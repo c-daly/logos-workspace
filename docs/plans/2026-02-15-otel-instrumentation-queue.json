@@ -1,0 +1,82 @@
+[
+  {
+    "id": "01a",
+    "group": "01-sophia-otel",
+    "depends_on": [],
+    "title": "Wire logos_observability into Sophia startup (closes #334)",
+    "description": "Integrate OpenTelemetry into Sophia's FastAPI app using the existing logos_observability shared module.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/sophia\nBranch: feature/otel-instrumentation\n\n1. Add OTel deps to pyproject.toml [tool.poetry.dependencies]:\n  opentelemetry-api = \"^1.20.0\"\n  opentelemetry-sdk = \"^1.20.0\"\n  opentelemetry-instrumentation-fastapi = \"^0.41b0\"\n  opentelemetry-exporter-otlp = \"^1.20.0\"\nRun: poetry lock --no-update\n\n2. Wire setup_telemetry into app lifespan\nFile: src/sophia/api/app.py\nLifespan at line 234. App created at line 372.\n\nAdd imports:\n  from logos_observability import setup_telemetry, get_tracer\n  from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor\n  import os\n\nInside lifespan(), at top before existing setup:\n  otlp_endpoint = os.getenv(\"OTEL_EXPORTER_OTLP_ENDPOINT\")\n  setup_telemetry(service_name=\"sophia\", export_to_console=os.getenv(\"OTEL_CONSOLE_EXPORT\", \"false\").lower() == \"true\", otlp_endpoint=otlp_endpoint)\n  logger.info(\"OpenTelemetry initialized\", extra={\"otlp_endpoint\": otlp_endpoint or \"none\"})\n\nAfter app = FastAPI(...):\n  FastAPIInstrumentor.instrument_app(app)\n\n3. Update .env.example — append OTel vars: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME=sophia, OTEL_CONSOLE_EXPORT=false\n\n4. Verify: poetry run pytest tests/integration/test_otel_smoke.py -v && poetry run pytest tests/ -v --timeout=30 -x\n\nCloses: #334",
+    "status": "pending"
+  },
+  {
+    "id": "01b",
+    "group": "01-sophia-otel",
+    "depends_on": ["01a"],
+    "title": "Add OTel spans to Sophia API endpoints (closes #335)",
+    "description": "Add manual spans with attributes to Sophia's key API endpoints.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/sophia\nFile: src/sophia/api/app.py — all endpoints in this single file.\n\nUse: from logos_observability import get_tracer; tracer = get_tracer(\"sophia.api\")\n\nEndpoints to instrument:\n1. POST /plan — span sophia.plan — attrs: plan.goal (str[:200]), plan.request_id\n2. POST /simulate — span sophia.simulate — attrs: simulate.plan_id, simulate.horizon\n3. GET/POST /state — span sophia.state.read/write — attrs: state.id\n4. POST /imagine — span sophia.imagine — attrs: imagine.request_id\n5. POST /execute — span sophia.execute — attrs: execute.plan_id, execute.step\n6. POST /ingest/hermes_proposal — span sophia.ingest.hermes_proposal — attrs: ingest.proposal_id, ingest.node_count\n7. GET /hcg/snapshot — span sophia.hcg.snapshot — attrs: hcg.limit\n\nPattern: wrap existing body in `with tracer.start_as_current_span(name) as span`, set attributes, record exceptions. Do NOT restructure existing logic.\nDo NOT instrument: /health, / (root), static routes.\n\nVerify: poetry run pytest tests/ -v --timeout=30 -x\nCloses: #335",
+    "status": "pending"
+  },
+  {
+    "id": "01c",
+    "group": "01-sophia-otel",
+    "depends_on": ["01b"],
+    "title": "Sophia OTel tests and documentation (closes #336)",
+    "description": "Add span verification tests and OTel docs for Sophia.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/sophia\n\n1. Span tests — create tests/unit/api/test_otel_spans.py\nUse InMemorySpanExporter fixture to capture and verify spans.\nTests: test_plan_endpoint_creates_span, test_simulate_endpoint_creates_span, test_span_records_exception_on_error, test_ingest_proposal_span_has_node_count\nUse FastAPI TestClient. Mock HCG/Neo4j.\n\n2. Documentation — create docs/observability/SOPHIA_OTEL.md\nInstrumented endpoints table, env var reference, how to run with OTel collector, example trace viewing. Under 100 lines.\n\n3. Verify existing smoke test: poetry run pytest tests/integration/test_otel_smoke.py -v\nVerify all: poetry run pytest tests/ -v --timeout=30\n\nCloses: #336",
+    "status": "pending"
+  },
+  {
+    "id": "02a",
+    "group": "02-hermes-otel",
+    "depends_on": [],
+    "title": "Wire logos_observability into Hermes startup (closes #337)",
+    "description": "Integrate OpenTelemetry into Hermes's FastAPI app using logos_observability.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/hermes\nBranch: feature/otel-instrumentation\n\n1. Add OTel deps to pyproject.toml (same as sophia). Run poetry lock --no-update.\n\n2. Wire setup_telemetry into app lifespan\nFile: src/hermes/main.py — lifespan at line 73, app at line 92.\nAdd imports: logos_observability setup_telemetry/get_tracer, FastAPIInstrumentor, os\nInside lifespan() top: setup_telemetry(service_name=\"hermes\", ...)\nAfter app = FastAPI(...): FastAPIInstrumentor.instrument_app(app)\n\n3. Update .env.example — append OTel vars.\n\n4. Verify: poetry run pytest tests/integration/test_otel_smoke.py -v && poetry run pytest tests/ -v --timeout=30 -x\n\nCloses: #337",
+    "status": "pending"
+  },
+  {
+    "id": "02b",
+    "group": "02-hermes-otel",
+    "depends_on": ["02a"],
+    "title": "Add OTel spans to Hermes API endpoints (closes #338)",
+    "description": "Add manual spans to Hermes's key API endpoints.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/hermes\nFile: src/hermes/main.py — all endpoints in this file.\n\nUse: tracer = get_tracer(\"hermes.api\")\n\nEndpoints:\n1. POST /embed_text — span hermes.embed_text — attrs: embedding.model, embedding.text_length, embedding.dimension\n2. POST /llm — span hermes.llm — attrs: llm.provider, llm.model, llm.max_tokens, llm.duration_ms\n3. POST /simple_nlp — span hermes.nlp — attrs: nlp.operations, nlp.text_length\n4. POST /stt — span hermes.stt — attrs: stt.format\n5. POST /tts — span hermes.tts — attrs: tts.text_length\n6. POST /ingest/media — span hermes.ingest.media — attrs: ingest.content_type\n7. POST /feedback — span hermes.feedback — attrs: feedback.type, feedback.correlation_id\n\nDo NOT instrument: /health, /, /ui\nVerify: poetry run pytest tests/ -v --timeout=30 -x\nCloses: #338",
+    "status": "pending"
+  },
+  {
+    "id": "02c",
+    "group": "02-hermes-otel",
+    "depends_on": ["02b"],
+    "title": "Hermes OTel tests and documentation (closes #339)",
+    "description": "Add span verification tests and docs for Hermes.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/hermes\n\n1. Span tests — create tests/hermes/test_otel_spans.py\nTests: test_embed_text_creates_span, test_llm_creates_span, test_nlp_creates_span, test_span_records_exception_on_error\nMock services as needed.\n\n2. Documentation — create docs/observability/HERMES_OTEL.md\nEndpoints table, span attribute reference, env vars, example LLM trace. Under 100 lines.\n\nVerify: poetry run pytest tests/ -v --timeout=30\nCloses: #339",
+    "status": "pending"
+  },
+  {
+    "id": "03a",
+    "group": "03-apollo-otel",
+    "depends_on": [],
+    "title": "Wire logos_observability into Apollo startup (partially closes #340)",
+    "description": "Integrate OpenTelemetry into Apollo's FastAPI backend. Browser-side deferred.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/apollo\nBranch: feature/otel-instrumentation\n\n1. Add OTel deps to pyproject.toml (same as others). Run poetry lock --no-update.\n\n2. Wire setup_telemetry into app lifespan\nFile: src/apollo/api/server.py — lifespan at line 274, app at line 399.\nAdd imports, setup_telemetry(service_name=\"apollo\", ...) in lifespan top.\nFastAPIInstrumentor.instrument_app(app) after app creation.\n\n3. Update .env.example — append OTel vars.\n\n4. Verify: poetry run pytest tests/integration/test_otel_smoke.py -v && poetry run pytest tests/ -v --timeout=30 -x\n\nPartially closes: #340 (backend only, browser-side deferred)",
+    "status": "pending"
+  },
+  {
+    "id": "03b",
+    "group": "03-apollo-otel",
+    "depends_on": ["03a"],
+    "title": "Add OTel spans to Apollo API and CLI (closes #341)",
+    "description": "Add spans to Apollo's API endpoints and CLI commands.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/apollo\n\nAPI File: src/apollo/api/server.py\ntracer = get_tracer(\"apollo.api\")\n\nAPI endpoints:\n1. POST /api/chat/stream — span apollo.api.chat — attrs: chat.prompt_length, chat.provider, chat.model\n2. GET /api/hcg/snapshot — span apollo.api.hcg.snapshot — attrs: hcg.limit\n3. GET /api/hcg/entities — span apollo.api.hcg.entities — attrs: hcg.count\n4. POST /api/persona/entries — span apollo.api.persona.create — attrs: persona.entry_type\n5. POST /api/media/upload — span apollo.api.media.upload — attrs: media.content_type\n\nCLI File: src/apollo/cli/main.py\ncli_tracer = get_tracer(\"apollo.cli\")\nCall setup_telemetry() in CLI group callback before commands run.\n\nCLI commands:\n1. plan — span apollo.cli.plan — attrs: plan.goal[:200]\n2. execute — span apollo.cli.execute — attrs: execute.plan_id, execute.step\n3. chat — span apollo.cli.chat — attrs: chat.prompt_length\n4. goal — span apollo.cli.goal — attrs: goal.description_length\n5. embed — span apollo.cli.embed — attrs: embed.text_length\n\nDo NOT instrument: /api/hcg/health, WebSocket /ws/diagnostics\nVerify: poetry run pytest tests/ -v --timeout=30 -x\nCloses: #341",
+    "status": "pending"
+  },
+  {
+    "id": "03c",
+    "group": "03-apollo-otel",
+    "depends_on": ["03b"],
+    "title": "Apollo OTel tests and documentation (closes #342)",
+    "description": "Add span tests and docs for Apollo.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/apollo\n\n1. API span tests — create tests/unit/api/test_otel_spans.py\nTests: test_chat_endpoint_creates_span, test_hcg_snapshot_creates_span, test_span_records_exception\n\n2. CLI span tests — create tests/unit/cli/test_otel_spans.py\nTests: test_plan_command_creates_span, test_execute_command_creates_span\n\nUse InMemorySpanExporter. Mock external services.\n\n3. Documentation — create docs/observability/APOLLO_OTEL.md\nAPI spans table, CLI spans table, env vars, browser-side deferred note. Under 100 lines.\n\nVerify: poetry run pytest tests/ -v --timeout=30\nCloses: #342",
+    "status": "pending"
+  },
+  {
+    "id": "04a",
+    "group": "04-logos-dashboards",
+    "depends_on": ["01c", "02c", "03c"],
+    "title": "Grafana dashboards and E2E verification (closes #344)",
+    "description": "Create per-service Grafana dashboards and E2E verification guide.\n\nWorking directory: /home/fearsidhe/projects/LOGOS/logos\nBranch: feature/otel-instrumentation\n\nContext: One dashboard at infra/dashboards/logos-key-signals.json. Compose at infra/docker-compose.otel.yml (Grafana+Tempo). Provisioning via infra/grafana-dashboards.yaml.\n\n1. Create dashboards in infra/dashboards/:\n\nsophia-traces.json: plan latency (TraceQL service.name=sophia, name=sophia.plan), simulate latency, error rate, recent traces\nhermes-traces.json: LLM latency (hermes.llm), embedding latency (hermes.embed_text), NLP latency, error rate, recent traces\napollo-traces.json: chat latency (apollo.api.chat), CLI times (apollo.cli.*), HCG latency, error rate\ncross-service.json: cross-service trace latency, service health overview\n\nEach: unique uid, descriptive title, tags [logos, otel, service], refresh 10s, time now-1h.\n\n2. E2E doc — create docs/observability/E2E_TRACE_VERIFICATION.md\nStart OTel stack, start services with env vars, generate test traces (curl), verify in Grafana/Jaeger, troubleshooting. Under 150 lines.\n\n3. Validate: dashboard JSON valid, CI workflow picks up new files.\n\nCloses: #344",
+    "status": "pending"
+  }
+]

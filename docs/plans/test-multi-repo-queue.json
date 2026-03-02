@@ -1,0 +1,140 @@
+{
+  "queue_meta": {
+    "created": "2026-01-24",
+    "description": "Test queue for multi-repo iterate workflow validation",
+    "version": 1,
+    "total_tasks": 9
+  },
+  "tasks": [
+    {
+      "id": "agent-swarm-tool-redirect-fix",
+      "repo": "agent-swarm",
+      "issue_number": null,
+      "title": "Fix subagent-tool-redirect.py hook not blocking Read/Edit tools for subagents",
+      "priority": "critical",
+      "type": "bug",
+      "group": "agent-swarm",
+      "blockedBy": [],
+      "blocks": [
+        "logos-473",
+        "logos-91",
+        "hermes-38",
+        "talos-35",
+        "sophia-36",
+        "apollo-111"
+      ],
+      "status": "pending",
+      "pr": null,
+      "file": "~/.claude/plugins/agent-swarm/hooks/subagent-tool-redirect.py",
+      "note": "Hook runs but does not block - agentId detection may be failing. Subagents should only use Bash with mcp-call."
+    },
+    {
+      "id": "agent-swarm-briefing-fix",
+      "repo": "agent-swarm",
+      "issue_number": null,
+      "title": "Update subagent-briefing.md to use mcp-call aliases instead of long-form MCP tool names",
+      "priority": "critical",
+      "type": "bug",
+      "group": "agent-swarm",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "completed",
+      "pr": null,
+      "file": "~/.claude/plugins/agent-swarm/hooks/subagent-briefing.md",
+      "note": "Replace mcp__plugin_agent-swarm_router__native__* with mcp-call native__* format"
+    },
+    {
+      "id": "agent-swarm-import-fix",
+      "repo": "agent-swarm",
+      "issue_number": null,
+      "title": "Fix import path in permission_store.py: 'from lib.tool_categories' should be 'from tool_categories'",
+      "priority": "critical",
+      "type": "bug",
+      "group": "agent-swarm",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "completed",
+      "pr": null,
+      "file": "~/.claude/plugins/agent-swarm/lib/permission_store.py",
+      "note": "Import fails when running iterate_workflow.py directly because lib isn't in sys.path"
+    },
+    {
+      "id": "logos-473",
+      "repo": "logos",
+      "issue_number": 473,
+      "title": "py.typed marker not being included in logos-foundry package",
+      "priority": "medium",
+      "type": "bug",
+      "group": "packaging",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    },
+    {
+      "id": "logos-91",
+      "repo": "logos",
+      "issue_number": 91,
+      "title": "Add OpenAPI validation tests",
+      "priority": "high",
+      "type": "testing",
+      "group": "testing",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    },
+    {
+      "id": "hermes-38",
+      "repo": "hermes",
+      "issue_number": 38,
+      "title": "Fix integration test scripts: service name mismatch and missing utility scripts",
+      "priority": "medium",
+      "type": "bug",
+      "group": "testing",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    },
+    {
+      "id": "talos-35",
+      "repo": "talos",
+      "issue_number": 35,
+      "title": "Adopt config helper and logging from logos_test_utils",
+      "priority": "medium",
+      "type": "feature",
+      "group": "infrastructure",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    },
+    {
+      "id": "sophia-36",
+      "repo": "sophia",
+      "issue_number": 36,
+      "title": "Audit other LOGOS services for Neo4j JSON serialization",
+      "priority": "medium",
+      "type": "refactor",
+      "group": "tech-debt",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    },
+    {
+      "id": "apollo-111",
+      "repo": "apollo",
+      "issue_number": 111,
+      "title": "Test Assessment: Address mock explosion and add coverage reporting",
+      "priority": "medium",
+      "type": "tech-debt",
+      "group": "infrastructure",
+      "blockedBy": [],
+      "blocks": [],
+      "status": "pending",
+      "pr": null
+    }
+  ]
+}

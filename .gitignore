@@ -1,0 +1,43 @@
+# Sub-repos (independently managed)
+sophia/
+hermes/
+talos/
+apollo/
+logos/
+
+# Separate wiki repo
+wiki/
+
+# Drafts and outreach
+outreach/
+
+# Next.js site
+next_site/
+
+# Claude Code internals
+.claude/
+
+# Serena
+.serena/
+
+# Context
+.context/
+
+# PoCs artifacts (generated caches, personal files, references)
+PoCs/embedding_cache.json
+PoCs/tiny_mind.json
+PoCs/**/*_revision_log.json
+PoCs/**/test_revision_log.json
+# (covered by recursive glob above)
+PoCs/*resume*
+PoCs/**/*.pdf
+PoCs/**/embedding_cache.json
+PoCs/**/tiny_mind.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
