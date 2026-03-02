@@ -2,17 +2,32 @@
 
 ## Ecosystem Overview
 
-LOGOS is a cognitive architecture composed of **five tightly coupled repositories**:
+LOGOS is a cognitive architecture composed of **six repositories**:
 
 | Repo | Purpose | AGENTS.md |
 |------|---------|-----------|
+| **logos-workspace** | Top-level workspace — shared config, PoCs, docs, tooling | *(this repo)* |
 | **logos** | Foundry—contracts, ontology, SDKs, shared tooling | `logos/AGENTS.md` |
 | **sophia** | Non-linguistic cognitive core (Orchestrator, CWM, Planner) | `sophia/AGENTS.md` |
 | **hermes** | Stateless language & embedding utility (STT, TTS, NLP) | `hermes/AGENTS.md` |
 | **talos** | Hardware abstraction layer for sensors/actuators | `talos/AGENTS.md` |
 | **apollo** | Thin client UI and command layer | `apollo/AGENTS.md` |
 
-**Each repo has its own AGENTS.md** with repo-specific guidance. Read it before working in that repo.
+**Each sub-repo has its own AGENTS.md** with repo-specific guidance. Read it before working in that repo.
+
+The project wiki is maintained in the `logos` repo and mirrored to `logos-workspace`. Use `pull_all.sh` to sync.
+
+---
+
+## Agent Teams Over Individual Subagents
+
+For non-trivial work, **prefer agent teams** (via `/orchestrate` or `TeamCreate`) over spawning individual subagents. Teams provide:
+
+- **Coordinated task lists** — shared visibility into what's done and what's blocked
+- **Parallel execution** — multiple agents working simultaneously on independent tasks
+- **Structured handoff** — agents communicate results through the task system, not ad-hoc summaries
+
+Use individual subagents only for quick, isolated lookups (single searches, file reads, one-off research).
 
 ---
 
@@ -39,47 +54,46 @@ Spawn subagents (via Task tool) for work that doesn't need full conversation con
 - `general-purpose` - Complex multi-step tasks, code changes
 - `Plan` - Architecture planning, implementation strategy
 
-                                                                                                            │
-│ ## Sub-agent Usage                                                                                           │
-│                                                                                                              │
-│ Use specialized agents proactively for better results:                                                       │
-│                                                                                                              │
-│ ### Exploration (use liberally)                                                                              │
-│ - Before modifying unfamiliar code, spawn an Explore agent to understand context                             │
-│ - For questions like "where is X handled?" or "how does Y work?", use Explore with appropriate thoroughness  │
-│ - When unsure about codebase patterns, explore first rather than guessing                                    │
-│                                                                                                              │
-│ ### Planning (use for non-trivial changes)                                                                   │
-│ - Before implementing features touching 3+ files, use Plan agent to design approach                          │
-│ - For refactoring tasks, plan first to identify all affected areas                                           │
-│ - Get user approval on plans before executing                                                                │
-│                                                                                                              │
-│ ### Parallel Agents                                                                                          │
-│ - When multiple independent investigations are needed, launch them simultaneously                            │
-│ - Example: researching both frontend and backend changes in parallel                                         │
-│ - Use background agents for long-running tasks while continuing other work                                   │
-│                                                                                                              │
-│ ### Research Tasks                                                                                           │
-│ - Use general-purpose agent for complex searches requiring multiple iterations                               │
-│ - Delegate documentation lookups and API research to agents                                                  │
-│ - Keep main context focused on implementation                                                                │
-│                                                                                                              │
-│ ## Workflow Patterns                                                                                         │
-│                                                                                                              │
-│ ### Before Coding                                                                                            │
-│ 1. Explore relevant areas of codebase                                                                        │
-│ 2. Plan implementation for complex changes                                                                   │
-│ 3. Verify understanding with user if ambiguous                                                               │
-│                                                                                                              │
-│ ### During Implementation                                                                                    │
-│ - Track progress with TodoWrite for multi-step tasks                                                         │
-│ - Run tests/builds in background while continuing work                                                       │
-│ - Spawn agents to investigate errors rather than guessing                                                    │
-│                                                                                                              │
-│ ### Code Review                                                                                              │
-│ - After significant changes, use Explore to verify no regressions in related code                            │
-│ - Check for similar patterns elsewhere that might need updates                                               │
-│                                                    
+## Sub-agent Usage
+
+Use specialized agents proactively for better results:
+
+### Exploration (use liberally)
+- Before modifying unfamiliar code, spawn an Explore agent to understand context
+- For questions like "where is X handled?" or "how does Y work?", use Explore with appropriate thoroughness
+- When unsure about codebase patterns, explore first rather than guessing
+
+### Planning (use for non-trivial changes)
+- Before implementing features touching 3+ files, use Plan agent to design approach
+- For refactoring tasks, plan first to identify all affected areas
+- Get user approval on plans before executing
+
+### Parallel Agents
+- When multiple independent investigations are needed, launch them simultaneously
+- Example: researching both frontend and backend changes in parallel
+- Use background agents for long-running tasks while continuing other work
+
+### Research Tasks
+- Use general-purpose agent for complex searches requiring multiple iterations
+- Delegate documentation lookups and API research to agents
+- Keep main context focused on implementation
+
+## Workflow Patterns
+
+### Before Coding
+1. Explore relevant areas of codebase
+2. Plan implementation for complex changes
+3. Verify understanding with user if ambiguous
+
+### During Implementation
+- Track progress with TodoWrite for multi-step tasks
+- Run tests/builds in background while continuing work
+- Spawn agents to investigate errors rather than guessing
+
+### Code Review
+- After significant changes, use Explore to verify no regressions in related code
+- Check for similar patterns elsewhere that might need updates
+
 ---
 
 ## Cross-Repo Workflow
@@ -106,20 +120,11 @@ Use `logos_config` package for environment, ports, settings across all repos.
 
 ---
 
-## Current Experiments
+## Paper Tracking
 
-### V-JEPA2 Fine-tuning
-- **Notebook**: `logos/experiments/notebooks/jepa_finetune_lora_v2.ipynb`
-- **Purpose**: Align V-JEPA2 video embeddings to CLIP semantic space
-- **Memory target**: 8GB VRAM (batch_size=1, float16, gradient checkpointing)
+- LOGOS has 13 candidate academic papers (see `LOGOS_Implementation_Spec.md` Appendix C). Paper logs live in the Obsidian vault at `10-projects/LOGOS/papers/`.
+- When implementation work produces results, measurements, or observations relevant to a paper, prompt the user: "This looks relevant to paper C.X — want to log it?" The user should not have to remember; you should notice and ask.
 
----
-
-  ## Paper Tracking
-
--  LOGOS has 13 candidate academic papers (see `LOGOS_Implementation_Spec.md` Appendix C). Paper logs live in the Obsidian vault at `10-projects/LOGOS/papers/`. 
--  When implementation work produces results, measurements, or observations relevant to a paper, prompt the user: "This looks relevant to paper C.X — want to log it?" The user should
--  not have to remember; you should notice and ask.
 ---
 
 ## Common Commands
