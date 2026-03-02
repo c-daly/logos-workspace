@@ -15,7 +15,9 @@ outreach/
 next_site/
 
 # Claude Code internals
-.claude/
+.claude/**
+!.claude/agents/
+!.claude/agents/**
 
 # Serena
 .serena/
@@ -23,12 +25,15 @@ next_site/
 # Context
 .context/
 
+# Handoff notes
+HANDOFF.md
+**/HANDOFF.md
+
 # PoCs artifacts (generated caches, personal files, references)
 PoCs/embedding_cache.json
 PoCs/tiny_mind.json
 PoCs/**/*_revision_log.json
 PoCs/**/test_revision_log.json
-# (covered by recursive glob above)
 PoCs/*resume*
 PoCs/**/*.pdf
 PoCs/**/embedding_cache.json
