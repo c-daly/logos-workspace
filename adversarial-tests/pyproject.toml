@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "adversarial-tests"
+version = "0.1.0"
+description = "Adversarial test rewriting tooling for LOGOS repos"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+
+[tool.poetry.group.dev.dependencies]
+mutmut = ">=2.0.0,<3.0.0"
+pytest = ">=8.0"
+pytest-cov = ">=6.0"
