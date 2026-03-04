@@ -63,7 +63,7 @@ The `docs/` directory contains ecosystem-wide documentation:
 | Doc | Purpose |
 |-----|---------|
 | `ARCHITECTURE.md` | System architecture and dependency graph |
-| `VISION.md` | Project vision and 7 major goals |
+| `VISION.md` | Project vision and major goals |
 | `STATUS.md` | Current project status (keep updated) |
 | `LOCAL_SETUP.md` | Local dev setup — Docker, Poetry, services |
 | `COGNITIVE_LOOP.md` | Perception → reasoning → planning → action loop |
@@ -72,7 +72,7 @@ The `docs/` directory contains ecosystem-wide documentation:
 | `TESTING.md` | Testing strategy — unit, integration, E2E |
 | `OBSERVABILITY.md` | OpenTelemetry, Jaeger, Grafana |
 | `PROJECT_TRACKING.md` | Issue tracking, epics, label conventions |
-| `PACKAGE_PUBLISHING.md` | Publishing logos-foundry to PyPI |
+| `PACKAGE_PUBLISHING.md` | Publishing logos-foundry packages |
 | `plans/` | Design docs and implementation specs |
 
 ---
