@@ -50,7 +50,7 @@ Expected layout:
 
 ## Start Infrastructure
 
-Neo4j and Milvus run as shared Docker containers. All repos connect to the same instances.
+Neo4j, Milvus, and Redis run as shared Docker containers. All repos connect to the same instances.
 
 ```bash
 cd ~/projects/LOGOS/logos
@@ -64,6 +64,9 @@ curl -s http://localhost:7474 | head -1
 
 # Milvus
 curl -s http://localhost:9091/healthz
+
+# Redis
+redis-cli ping  # Expected: PONG
 ```
 
 ## Install Python Dependencies
@@ -113,7 +116,7 @@ cp ~/projects/LOGOS/sophia/.env.example ~/projects/LOGOS/sophia/.env 2>/dev/null
 cp ~/projects/LOGOS/hermes/.env.example ~/projects/LOGOS/hermes/.env 2>/dev/null || true
 ```
 
-The defaults connect to shared infrastructure on standard ports (Neo4j 7687, Milvus 19530). You shouldn't need to change anything for local dev. Check each repo's `.env.example` for repo-specific settings (e.g., model paths for Hermes, cognitive core config for Sophia).
+The defaults connect to shared infrastructure on standard ports (Neo4j 7687, Milvus 19530, Redis 6379). You shouldn't need to change anything for local dev. Check each repo's `.env.example` for repo-specific settings (e.g., model paths for Hermes, cognitive core config for Sophia).
 
 ## Start Services
 
