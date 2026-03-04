@@ -79,6 +79,7 @@ All repos share the same infrastructure services:
 |---------|--------------|---------|
 | Neo4j | 7474 (HTTP), 7687 (Bolt) | Graph database for HCG |
 | Milvus | 19530 (gRPC), 9091 (metrics) | Vector database for embeddings |
+| Redis | 6379 | Pub/sub events and caching |
 
 ### Port Scheme: Shared vs Test Isolation
 
