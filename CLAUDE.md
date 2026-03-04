@@ -1,98 +1,25 @@
-# CLAUDE.md - Project Guidelines for Claude Code
+# CLAUDE.md — logos-workspace
 
-## Ecosystem Overview
+## What This Is
 
-LOGOS is a cognitive architecture composed of **six repositories**:
+Top-level workspace for the LOGOS cognitive architecture. Contains the 5 service repos as subdirectories, shared documentation, and cross-repo tooling.
 
-| Repo | Purpose | AGENTS.md |
-|------|---------|-----------|
-| **logos-workspace** | Top-level workspace — shared config, PoCs, docs, tooling | *(this repo)* |
-| **logos** | Foundry—contracts, ontology, SDKs, shared tooling | `logos/AGENTS.md` |
-| **sophia** | Non-linguistic cognitive core (Orchestrator, CWM, Planner) | `sophia/AGENTS.md` |
-| **hermes** | Stateless language & embedding utility (STT, TTS, NLP) | `hermes/AGENTS.md` |
-| **talos** | Hardware abstraction layer for sensors/actuators | `talos/AGENTS.md` |
-| **apollo** | Thin client UI and command layer | `apollo/AGENTS.md` |
+## Ecosystem
 
-**Each sub-repo has its own AGENTS.md** with repo-specific guidance. Read it before working in that repo.
+| Repo | Purpose | Port |
+|------|---------|------|
+| **logos** | Foundry — contracts, ontology, shared `logos_*` packages | 37000 |
+| **sophia** | Cognitive core — orchestrator, CWM, planner, ingestion, feedback | 47000 |
+| **hermes** | Language services — STT, TTS, NLP, embeddings, LLM gateway | 17000 |
+| **talos** | Hardware abstraction — sensors, actuators, simulation | 57000 |
+| **apollo** | Client layer — React webapp, Python API, CLI | 27000 |
 
-The project wiki is maintained in the `logos` repo and mirrored to `logos-workspace`. Use `pull_all.sh` to sync.
+**Infrastructure** (shared, default ports):
+- Neo4j: 7474 (HTTP), 7687 (Bolt)
+- Milvus: 19530 (gRPC), 9091 (metrics)
+- Redis: 6379
 
----
-
-## Agent Teams Over Individual Subagents
-
-For non-trivial work, **prefer agent teams** (via `/orchestrate` or `TeamCreate`) over spawning individual subagents. Teams provide:
-
-- **Coordinated task lists** — shared visibility into what's done and what's blocked
-- **Parallel execution** — multiple agents working simultaneously on independent tasks
-- **Structured handoff** — agents communicate results through the task system, not ad-hoc summaries
-
-Use individual subagents only for quick, isolated lookups (single searches, file reads, one-off research).
-
----
-
-## Token Efficiency: Use Subagents
-
-Spawn subagents (via Task tool) for work that doesn't need full conversation context. Each subagent has its own context window—only a summary returns to the main conversation.
-
-### Use Subagents For
-1. **Code exploration** - "Find all files that use X", "How does Y work"
-2. **Cross-repo searches** - Searching across multiple repos
-3. **Research tasks** - Looking up docs, finding patterns
-4. **Large refactors** - Mechanical changes across many files
-5. **Test execution** - Running suites and analyzing results
-6. **Documentation generation** - Docstrings, READMEs
-
-### Do NOT Use Subagents For
-- Quick single-file edits (do directly)
-- Tasks requiring conversation history
-- Interactive debugging with user
-- Tasks with <3 steps
-
-### Subagent Types
-- `Explore` - Fast codebase exploration, file searches
-- `general-purpose` - Complex multi-step tasks, code changes
-- `Plan` - Architecture planning, implementation strategy
-
-## Sub-agent Usage
-
-Use specialized agents proactively for better results:
-
-### Exploration (use liberally)
-- Before modifying unfamiliar code, spawn an Explore agent to understand context
-- For questions like "where is X handled?" or "how does Y work?", use Explore with appropriate thoroughness
-- When unsure about codebase patterns, explore first rather than guessing
-
-### Planning (use for non-trivial changes)
-- Before implementing features touching 3+ files, use Plan agent to design approach
-- For refactoring tasks, plan first to identify all affected areas
-- Get user approval on plans before executing
-
-### Parallel Agents
-- When multiple independent investigations are needed, launch them simultaneously
-- Example: researching both frontend and backend changes in parallel
-- Use background agents for long-running tasks while continuing other work
-
-### Research Tasks
-- Use general-purpose agent for complex searches requiring multiple iterations
-- Delegate documentation lookups and API research to agents
-- Keep main context focused on implementation
-
-## Workflow Patterns
-
-### Before Coding
-1. Explore relevant areas of codebase
-2. Plan implementation for complex changes
-3. Verify understanding with user if ambiguous
-
-### During Implementation
-- Track progress with TodoWrite for multi-step tasks
-- Run tests/builds in background while continuing work
-- Spawn agents to investigate errors rather than guessing
-
-### Code Review
-- After significant changes, use Explore to verify no regressions in related code
-- Check for similar patterns elsewhere that might need updates
+**Each sub-repo has its own CLAUDE.md.** Read it before working in that repo.
 
 ---
 
@@ -100,59 +27,130 @@ Use specialized agents proactively for better results:
 
 ### Contract changes flow downstream
 ```
-logos (contracts) → sophia, hermes, talos, apollo
+logos (contracts, ontology, logos_* packages) → sophia, hermes, talos, apollo
 ```
-If you need to change an API, update the contract in logos first.
-
-### Port allocation
-| Repo | API | Neo4j | Milvus |
-|------|-----|-------|--------|
-| hermes | 17000 | 7474/7687 | 19530 |
-| apollo | 27000 | 7474/7687 | 19530 |
-| logos | 37000 | 7474/7687 | 19530 |
-| sophia | 47000 | 7474/7687 | 19530 |
-| talos | 57000 | 7474/7687 | 19530 |
-
-Infrastructure (Neo4j, Milvus) runs on default ports — shared across all repos.
+Update contracts in logos first, then propagate.
 
 ### Shared config
-Use `logos_config` package for environment, ports, settings across all repos.
+All repos use `logos_config` for environment, ports, and settings:
+```python
+from logos_config import Neo4jConfig, MilvusConfig, RedisConfig, OtelConfig
+from logos_config.ports import get_repo_ports
+```
+
+### Inter-service communication
+- **Redis pub/sub** (`logos_events.EventBus`) for async events between services
+- **REST APIs** for synchronous calls (contracts in `logos/contracts/`)
+- Sophia publishes ontology events → Hermes subscribes for type sync
+
+---
+
+## Workspace-Level Tools
+
+| Tool | Purpose |
+|------|---------|
+| `pull_all.sh` | Fetch + fast-forward all repos, sync wiki |
+| `scripts/reconcile-issues.sh` | Audit issue/PR linkage across all 5 GitHub repos |
+
+The project wiki is maintained in `logos` and mirrored here via `pull_all.sh`.
+
+---
+
+## Workspace-Level Docs
+
+The `docs/` directory contains ecosystem-wide documentation:
+
+| Doc | Purpose |
+|-----|---------|
+| `ARCHITECTURE.md` | System architecture and dependency graph |
+| `VISION.md` | Project vision and major goals |
+| `STATUS.md` | Current project status (keep updated) |
+| `LOCAL_SETUP.md` | Local dev setup — Docker, Poetry, services |
+| `COGNITIVE_LOOP.md` | Perception → reasoning → planning → action loop |
+| `CI_CD.md` | CI/CD pipeline and GitHub Actions |
+| `CODE_QUALITY.md` | Linting (ruff), formatting (black), type checking (mypy) |
+| `TESTING.md` | Testing strategy — unit, integration, E2E |
+| `OBSERVABILITY.md` | OpenTelemetry, Jaeger, Grafana |
+| `PROJECT_TRACKING.md` | Issue tracking, epics, label conventions |
+| `PACKAGE_PUBLISHING.md` | Publishing logos-foundry packages |
+| `plans/` | Design docs and implementation specs |
+
+---
+
+## Agent Teams Over Individual Subagents
+
+For non-trivial work, **prefer agent teams** (via `/orchestrate` or `TeamCreate`) over individual subagents. Teams provide coordinated task lists, parallel execution, and structured handoff.
+
+Use individual subagents only for quick, isolated lookups.
+
+### Subagent Types
+- `Explore` — fast codebase exploration, file searches
+- `general-purpose` — complex multi-step tasks, code changes
+- `Plan` — architecture planning, implementation strategy
+
+### When to Use Subagents
+- Code exploration, cross-repo searches, research
+- Large refactors, test execution, documentation generation
+
+### When NOT to Use Subagents
+- Quick single-file edits (do directly)
+- Tasks requiring conversation history
+- Tasks with <3 steps
+
+---
+
+## Workflow Patterns
+
+### Before Coding
+1. Explore relevant areas of codebase
+2. Plan implementation for complex changes (3+ files)
+3. Verify understanding with user if ambiguous
+
+### During Implementation
+- Track progress with task tools for multi-step work
+- Run tests in background while continuing other work
+- Spawn agents to investigate errors rather than guessing
+
+### Code Review
+- After significant changes, explore related code for regressions
+- Check for similar patterns elsewhere that might need updates
 
 ---
 
 ## Paper Tracking
 
-- LOGOS has 13 candidate academic papers (see `LOGOS_Implementation_Spec.md` Appendix C). Paper logs live in the Obsidian vault at `10-projects/LOGOS/papers/`.
-- When implementation work produces results, measurements, or observations relevant to a paper, prompt the user: "This looks relevant to paper C.X — want to log it?" The user should not have to remember; you should notice and ask.
+LOGOS has 13 candidate academic papers (see `LOGOS_Implementation_Spec.md` Appendix C). Paper logs live in the Obsidian vault at `10-projects/LOGOS/papers/`.
+
+When implementation work produces results relevant to a paper, prompt the user: "This looks relevant to paper C.X — want to log it?"
 
 ---
 
 ## Common Commands
 
 ```bash
-# Clear notebook outputs (fixes VS Code caching issues)
-jupyter nbconvert --clear-output --inplace NOTEBOOK.ipynb
+# Sync all repos
+./pull_all.sh
 
-# Or via Python
-python -c "import json; nb=json.load(open('NB.ipynb')); [c.update({'outputs':[],'execution_count':None}) for c in nb['cells'] if c['cell_type']=='code']; json.dump(nb,open('NB.ipynb','w'),indent=1)"
-
-# Lint (all repos use ruff + mypy)
+# Lint & format (all repos use ruff + black + mypy)
 poetry run ruff check --fix .
-poetry run ruff format .
+poetry run black .
 poetry run mypy src/
 
 # Run tests
 poetry run pytest tests/
+
+# Clear notebook outputs
+jupyter nbconvert --clear-output --inplace NOTEBOOK.ipynb
 ```
 
 ---
 
 ## Code Standards (all repos)
 
-- **Type hints**: Required for public functions
-- **Docstrings**: Required for complex functions
-- **Small functions**: Prefer composable over monolithic
-- **Backward compat**: Maintain unless explicitly breaking
-- **Security**: Never log secrets/PII, sanitize inputs
+- **Type hints**: required for public functions
+- **Docstrings**: required for complex logic
+- **Small functions**: prefer composable over monolithic
+- **Backward compat**: maintain unless explicitly breaking
+- **Security**: never log secrets/PII, sanitize inputs
 
 See `logos/docs/TESTING_STANDARDS.md` and `logos/docs/GIT_PROJECT_STANDARDS.md` for full standards.
