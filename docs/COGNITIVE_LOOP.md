@@ -1,6 +1,6 @@
 # Cognitive Loop — What It Does and Doesn't Do
 
-An honest accounting of the cognitive loop feature shipped in logos PRs #490/#491, sophia PRs #125/#127, and hermes PRs #82/#84. This document was created to clear up confusion from the PR process about what was actually implemented.
+An honest accounting of the cognitive loop feature, covering the initial implementation (logos #490/#491, sophia #125/#127, hermes #82/#84) and the performance sprint (sophia #128/#131, hermes #85, apollo #161, logos #492). Updated 2026-02-28.
 
 ## The End-to-End Flow
 
@@ -65,6 +65,8 @@ Hermes POST /llm
 | Graceful degradation | Working | If Sophia is down, no token configured, or any error occurs — LLM call proceeds without context |
 | `RelationExtractor` | Working | spaCy dependency parsing extracts verb-mediated relations between NER entities. Configurable via `RELATION_EXTRACTOR` env var |
 | `EmbeddingProvider` protocol | Working | Pluggable embedding generation. Default: SentenceTransformerProvider (all-MiniLM-L6-v2). Configurable via `EMBEDDING_PROVIDER` and `EMBEDDING_MODEL` env vars |
+| Parallel pipeline | Working | NER extraction, embedding generation, and proposal building run in parallel (hermes #85) |
+| Redis context cache | Working | Context responses cached in Redis to avoid redundant Sophia round-trips (hermes #85) |
 
 ### Sophia Side
 
@@ -81,6 +83,9 @@ Hermes POST /llm
 | Feedback worker | Working | Retries with exponential backoff, max 5 attempts, dead-letter queue |
 | Edge processing | Working | Resolves entity names to UUIDs, creates reified edge nodes in Neo4j, stores edge embeddings in Milvus "Edge" collection |
 | Experiment tracking | Working | Creates experiment_run nodes with PRODUCED edges to track pipeline configuration and outputs |
+| Batch proposal processing | Working | Proposals are batched and processed in parallel (sophia #131), reducing per-proposal overhead |
+| Async proposal dispatch | Working | Proposal processing is async with reduced loop overhead (sophia #128) |
+| Type classification via centroids | Working | Sophia owns type semantics — classifies entities by embedding distance to type centroids (sophia #129, logos #494). Replaces Hermes-side classification |
 
 ### Logos Foundry Side
 
@@ -124,7 +129,7 @@ Every other write endpoint in Sophia requires `Authorization: Bearer <token>`. T
 
 ## What's Not Implemented (Pending in Task Queue)
 
-The `docs/2026-02-13-cognitive-loop-task-queue.json` file lists tasks that PR #490 was supposed to enable. Several remain pending:
+The original task queue (from PR #490) listed several pending items. Current status:
 
 | Task | Description | Status |
 |------|-------------|--------|
@@ -172,9 +177,11 @@ The `docs/2026-02-13-cognitive-loop-task-queue.json` file lists tasks that PR #4
 
 4. **Idempotent writes.** Both `add_node` and `add_edge` use `MERGE`, so replaying proposals doesn't create duplicates.
 
+5. **Type classification in Sophia, not Hermes.** Type semantics are owned by the cognitive core, not the language service. Sophia classifies entities by embedding distance to type centroids (sophia #129, logos #494). Hermes extracts entities and relations but does not assign types — that's Sophia's job.
+
 ### Concerns
 
-1. **Redundant embedding generation.** Every `/llm` call generates O(n_entities + 1) embeddings in memory before the LLM is even called. There is no caching — the same entity mentioned across 100 messages generates 100 fresh embeddings. Sophia deduplicates on storage, but the embedding computation and HTTP round-trips add unnecessary latency.
+1. **Redundant embedding generation.** Every `/llm` call generates O(n_entities + 1) embeddings in memory before the LLM is even called. Hermes now caches context responses in Redis (hermes #85), which reduces redundant Sophia round-trips. Sophia deduplicates on storage. The parallel pipeline also mitigates latency by overlapping embedding generation with other work.
 
 2. **L2 threshold is a magic number.** `ENTITY_MATCH_THRESHOLD = 0.5` is hardcoded, undocumented, and untested. For 384-dim MiniLM embeddings, this is a reasonable guess, but it should be validated empirically. Too low = excessive dedup (legitimate new entities get skipped). Too high = no dedup (every mention creates a new node).
 
