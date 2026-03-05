@@ -137,7 +137,7 @@ def run_experiment(
         train_loss_accum = 0.0
         train_batches = 0
 
-        for batch_jepa, batch_clip in train_loader:
+        for batch_idx, (batch_jepa, batch_clip) in enumerate(train_loader, 1):
             optimizer.zero_grad()
             pred = model(batch_jepa)
             result = loss_fn(pred, batch_clip)
@@ -153,6 +153,19 @@ def run_experiment(
             train_loss_accum += loss.item()
             train_batches += 1
 
+            batch_cos = _compute_cosine_similarity(pred.detach(), batch_clip)
+            acc_str = ""
+            if "accuracy" in result:
+                acc_str = f"  acc={result['accuracy']:.3f}"
+            logger.debug(
+                "  [train] batch %d/%d  loss=%.4f  cosine_sim=%.4f%s",
+                batch_idx,
+                len(train_loader),
+                loss.item(),
+                batch_cos,
+                acc_str,
+            )
+
         avg_train_loss = train_loss_accum / max(train_batches, 1)
 
         # --- Validate ---
@@ -162,12 +175,22 @@ def run_experiment(
         val_batches = 0
 
         with torch.no_grad():
-            for batch_jepa, batch_clip in val_loader:
+            for batch_idx, (batch_jepa, batch_clip) in enumerate(val_loader, 1):
                 pred = model(batch_jepa)
                 result = loss_fn(pred, batch_clip)
-                val_loss_accum += result["loss"].item()
-                val_cosine_accum += _compute_cosine_similarity(pred, batch_clip)
+                batch_loss = result["loss"].item()
+                batch_cos = _compute_cosine_similarity(pred, batch_clip)
+                val_loss_accum += batch_loss
+                val_cosine_accum += batch_cos
                 val_batches += 1
+
+                logger.debug(
+                    "  [val]   batch %d/%d  loss=%.4f  cosine_sim=%.4f",
+                    batch_idx,
+                    len(val_loader),
+                    batch_loss,
+                    batch_cos,
+                )
 
         avg_val_loss = val_loss_accum / max(val_batches, 1)
         avg_val_cosine = val_cosine_accum / max(val_batches, 1)
@@ -269,10 +292,15 @@ def main() -> None:
         default=None,
         help="Optional path to write results JSON.",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable batch-level logging (DEBUG level).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
