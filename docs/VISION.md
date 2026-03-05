@@ -21,41 +21,35 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 - **Embodiment** — hardware abstraction, simulation, real-world actuation (Talos)
 - **Memory** — hierarchical storage, reflection, episodic learning
 - **Ontology** — type system, IS_A edges, reified model, graph-native schema
-- **Infrastructure** — shared tooling, CI/CD, observability, testing, developer experience
+- **Infrastructure** — shared tooling, CI/CD, event bus, observability, developer experience
 - **Research** — exploratory experiments, PoCs, and learning architecture proposals that inform the core architecture
 - **Tooling** — developer workflow automation, agent orchestration, and productivity tools that support LOGOS development
 
 ## Goals
 
 1. **Complete the cognitive loop** — in progress
-   The core perception → reasoning → action cycle works end-to-end (Hermes extracts entities/relations, Sophia stores and retrieves from HCG, context enriches LLM responses). Expand with: feedback processing, planning integration, multi-turn memory, context quality improvements.
+   The core perception → reasoning → action cycle works end-to-end (Hermes extracts entities/relations, Sophia stores and retrieves from HCG, context enriches LLM responses). Centralized Redis event bus (`logos_events`) provides the backbone. Ontology pub/sub distribution keeps Sophia and Hermes type-synced at runtime. The maintenance scheduler gives Sophia autonomous graph-reasoning triggers. KG maintenance work (entity resolution, type correction, relationship inference, ontology evolution) is how this loop becomes self-correcting. Expand with: entity resolution (#503), feedback processing, planning integration, multi-turn memory.
 
-2. **Grounded perception via JEPA** — in progress
-   Give Sophia non-linguistic common sense through JEPA models that learn physical/sensory representations. PoC exists in sophia (#76) with tests, docs, and backend integration. This is what makes LOGOS fundamentally different from text-only systems — cognition grounded in experience, not language.
+2. **Grounding and physical knowledge** — deferred (prerequisites in progress)
+   Give Sophia intuitive physical common sense — the ability to recognize when something is physically ridiculous, or to anticipate what happens when a robot takes a corner too fast. This is what makes LOGOS fundamentally different from text-only systems: cognition grounded in experience, not language. The implementation approach is JEPA (Joint Embedding Predictive Architecture) models that learn physical/sensory representations without text, feeding into CWM-G. PoC exists in sophia (#76) with pluggable backend, tests, docs, and API shape validation. **Currently deferred:** the foundational cognitive mechanisms (memory systems, event-driven reflection, KG maintenance) must mature first. Serious sensory integration begins after the text-based cognitive loop demonstrates success.
 
 3. **Flexible ontology** — in progress
-   Replace rigid schema-typed nodes with a structure-typed model where meaning comes from IS_A edges and graph position. Core reified model is implemented (PR #490); stale artifacts, downstream queries, and validation need updating.
+   Replace rigid schema-typed nodes with a structure-typed model where meaning comes from IS_A edges and graph position. Core reified model is implemented (PR #490); ontology hierarchy restructured (#510). CWM-A, CWM-G, and CWM-E are semantically distinct aspects of the same graph — the current module-level separation (separate packages, raw Cypher) needs to become ontology-level (type definitions, HCG client, #496). Remaining: downstream repo updates (#460, #461), type_definition UUID migration (#515), capability catalog (#465).
 
 4. **Memory and learning** — not started
-   Transform LOGOS from a stateless system into one that learns from experience. Hierarchical memory (ephemeral → short-term → long-term), event-driven reflection, selective diary entries, episodic learning. Spec exists (#415), prerequisites need completing.
+   Transform LOGOS from a stateless system into one that learns from experience. Hierarchical memory (ephemeral → short-term → long-term), event-driven reflection, selective diary entries, episodic learning. Spec exists (#415), prerequisites need completing. The Redis event bus and maintenance scheduler landed as foundational infrastructure. Testing sanity (#416, priority:critical) must happen first.
 
-5. **CWM unification** — not started
-   CWM-A (abstract), CWM-G (grounded), and CWM-E (emotional) are semantically distinct aspects but all live on the same graph. The current module-level separation (separate packages, raw Cypher) needs to become ontology-level (type definitions, HCG client). The distinction is real; the implementation boundary is wrong (#496).
+5. **Planning and execution** — in progress
+   Sophia reasons in order to act — whether that's answering a user's question ("how do I get to LA by tomorrow?") or driving a robot arm from point A to point B. The HCGPlanner does backward-chaining over REQUIRES/CAUSES edges to produce executable plans represented as Process nodes. Planner stub still exists alongside the real implementation (#403). As Talos matures, plans connect to real-world actuation. Blocked on flexible ontology downstream updates (#460).
 
-6. **Planning and execution** — in progress
-   Sophia reasons in order to act — whether that's answering a user's question ("how do I get to LA by tomorrow?") or driving a robot arm from point A to point B. The HCGPlanner does backward-chaining over REQUIRES/CAUSES edges to produce executable plans represented as Process nodes. Planner stub still exists alongside the real implementation (#403). As Talos matures, plans connect to real-world actuation.
+6. **Embodiment via Talos** — paused
+   Talos abstracts hardware behind a consistent HAL. Current state is a simulation scaffold — `docs/proposed_docs/TALOS_IMPROVEMENTS.md` outlines the path to physics-backed simulation (ROS2/Gazebo/MuJoCo). Connects Sophia's plans to real-world actuation and perception feeds (camera frames, IMU, joint state) back into the cognitive loop. Correctly deprioritized until the cognitive layer is solid.
 
-7. **Embodiment via Talos** — in progress
-   Talos abstracts hardware behind a consistent HAL. Current state is a simulation scaffold — `docs/proposed_docs/TALOS_IMPROVEMENTS.md` outlines the path to physics-backed simulation (ROS2/Gazebo/MuJoCo). Connects Sophia's plans to real-world actuation and perception feeds (camera frames, IMU, joint state) back into the cognitive loop.
+7. **Infrastructure and observability** — in progress
+   CI discipline tooling (branch naming, issue linkage) landed across all repos. Reusable workflows pinned to ci/v2. Centralized Redis and `logos_events` package provide the event backbone. Port standardization completed. Docker stacks aligned. OTel instrumentation exists across services via `logos_observability`; Apollo has OTel integration (PR #156). Gaps remain in endpoint-level spans (#335, #338, #341), cross-service testing (#321), and OTel documentation (#339, #342). #340 (Apollo SDK, priority:critical) needs triage against PR #156. Remaining: standardize repos (#433), developer scripts (#409), test data seeder (#481).
 
-8. **Observability** — in progress
-   OTel instrumentation exists across services via `logos_observability`. Gaps remain in Apollo SDK integration, Hermes/Sophia endpoint-level spans, and cross-service testing.
-
-9. **Documentation** — in progress
-   Proposed replacement docs exist in `docs/proposed_docs/`. Need to execute the manifest: move into place, archive stale docs, per-repo cleanup.
-
-10. **Testing and infrastructure** — in progress
-    Test suites pass across repos with real infrastructure. Remaining: logos coverage improvement, standardized test conventions, OpenAPI contract tests for Hermes.
+8. **Documentation and testing** — in progress
+   Documentation: 13 duplicate ecosystem docs removed, CLAUDE.md consolidated across all 6 repos, SPEC.md updated with Redis/logos_events, READMEs corrected. Testing: suites pass across repos with real infrastructure. Remaining: developer onboarding guide (#135), proposed doc execution (#447), logos coverage improvement, OpenAPI contract tests (#91), standardized test conventions (#420).
 
 ## Non-Goals
 
@@ -66,7 +60,7 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 
 ## Current Priorities
 
-1. Cognitive loop expansion (feedback processing, multi-turn memory)
-2. Grounded perception via JEPA (CWM-G maturation)
-3. Flexible ontology cleanup (stale artifacts, downstream queries)
-4. CWM unification (cleanup — not blocking memory work)
+1. Cognitive loop expansion (entity resolution, feedback processing, KG maintenance execution)
+2. Flexible ontology downstream propagation (#460, #461, #515)
+3. KG maintenance stories (#503, #504, #505, #506)
+4. Infrastructure hardening (remaining standardization, coverage)
