@@ -4,3 +4,4 @@ checkpoints/
 log.json
 __pycache__/
 *.pyc
+.venv/
