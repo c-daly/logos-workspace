@@ -42,7 +42,7 @@ Schema (all fields optional — only include what you're changing from defaults)
 - loss.terms: [{function (mse|cosine|contrastive), target (clip_image|clip_text_mean|clip_text_first), weight, temperature (0.01-1.0), label_smoothing (0.0-0.2)}]
 - loss.warmup_terms: loss mix for first warmup_epochs epochs; loss.warmup_epochs: int
 - training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256|512|1024), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
-- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3), num_frames (1 to max available, or null for all) — controls how many CLIP image frames are averaged as the supervision target
+- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3)
 
 Respond with:
 
@@ -225,34 +225,31 @@ def generate_round1_configs() -> list[ExperimentConfig]:
     """Five initial configs covering architectures, loss strategies, and batch sizes."""
     return [
         ExperimentConfig(
-            experiment_id="exp_001_linear_mse_f1",
+            experiment_id="exp_001_linear_mse",
             architecture=ArchitectureConfig(type="linear"),
             training=TrainingConfig(batch_size=128, max_epochs=200, early_stop_patience=10),
             loss=LossConfig(terms=[{"function": "mse", "target": "clip_image", "weight": 1.0,
                                     "temperature": 0.07, "label_smoothing": 0.0}]),
-            data=DataConfig(num_frames=1),
         ),
         ExperimentConfig(
-            experiment_id="exp_002_mlp_cosine_f4",
+            experiment_id="exp_002_mlp_cosine",
             architecture=ArchitectureConfig(type="mlp", hidden_dim=512, num_layers=2),
             training=TrainingConfig(batch_size=256, max_epochs=200, early_stop_patience=10),
             loss=LossConfig(terms=[
                 {"function": "cosine", "target": "clip_image", "weight": 1.0, "temperature": 0.07, "label_smoothing": 0.0},
             ]),
-            data=DataConfig(num_frames=4),
         ),
         ExperimentConfig(
-            experiment_id="exp_003_mlp_multitarget_f16",
+            experiment_id="exp_003_mlp_multitarget",
             architecture=ArchitectureConfig(type="mlp", hidden_dim=512, num_layers=3),
             training=TrainingConfig(batch_size=256, max_epochs=200, early_stop_patience=10, warmup_epochs=10),
             loss=LossConfig(terms=[
                 {"function": "cosine", "target": "clip_image", "weight": 0.6, "temperature": 0.07, "label_smoothing": 0.0},
                 {"function": "cosine", "target": "clip_text_mean", "weight": 0.4, "temperature": 0.07, "label_smoothing": 0.0},
             ]),
-            data=DataConfig(num_frames=16),
         ),
         ExperimentConfig(
-            experiment_id="exp_004_residual_mse_warmup_f32",
+            experiment_id="exp_004_residual_mse_warmup",
             architecture=ArchitectureConfig(type="residual", hidden_dim=512, num_blocks=4),
             training=TrainingConfig(batch_size=256, max_epochs=200, early_stop_patience=10, warmup_epochs=20),
             loss=LossConfig(
@@ -260,10 +257,9 @@ def generate_round1_configs() -> list[ExperimentConfig]:
                 warmup_terms=[{"function": "mse", "target": "clip_image", "weight": 1.0, "temperature": 0.07, "label_smoothing": 0.0}],
                 warmup_epochs=20,
             ),
-            data=DataConfig(num_frames=32),
         ),
         ExperimentConfig(
-            experiment_id="exp_005_residual_silu_fall",
+            experiment_id="exp_005_residual_silu",
             architecture=ArchitectureConfig(type="residual", hidden_dim=768, num_blocks=6, dropout=0.1, activation="silu"),
             training=TrainingConfig(batch_size=256, max_epochs=300, early_stop_patience=15,
                                     lr=3e-4, warmup_epochs=15, cooldown_epochs=30, lr_schedule="cosine"),
@@ -271,7 +267,7 @@ def generate_round1_configs() -> list[ExperimentConfig]:
                 {"function": "cosine", "target": "clip_image", "weight": 0.7, "temperature": 0.07, "label_smoothing": 0.0},
                 {"function": "cosine", "target": "clip_text_mean", "weight": 0.3, "temperature": 0.07, "label_smoothing": 0.0},
             ]),
-            data=DataConfig(noise_std=0.01, embedding_dropout=0.05, num_frames=None),
+            data=DataConfig(noise_std=0.01, embedding_dropout=0.05),
         ),
     ]
 

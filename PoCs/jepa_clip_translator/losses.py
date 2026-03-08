@@ -66,7 +66,10 @@ def compute_loss(
         else:
             t = term
         target = _resolve_target(t.target, clip_image, clip_text)
-        result = _PRIMITIVES[t.function](pred, target, temperature=t.temperature, label_smoothing=t.label_smoothing)
+        # If pred has a token dimension that target lacks, pool pred first.
+        # (e.g. clip_text targets are (B, 768) while pred may be (B, T, 768))
+        effective_pred = pred.mean(dim=1) if pred.dim() > target.dim() else pred
+        result = _PRIMITIVES[t.function](effective_pred, target, temperature=t.temperature, label_smoothing=t.label_smoothing)
         total = total + t.weight * result["loss"]
         total_weight += t.weight
         if "accuracy" in result and acc is None:

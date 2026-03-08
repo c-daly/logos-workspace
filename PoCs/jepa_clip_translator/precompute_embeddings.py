@@ -9,13 +9,42 @@ from __future__ import annotations
 import argparse
 import logging
 from typing import Any
-
+import pathlib
 import h5py
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
+
+
+def _get_token_dims(model: Any, total_tokens: int) -> tuple[int, int]:
+    """Infer (T_tokens, S_tokens) from V-JEPA model config.
+
+    Returns the number of temporal and spatial patch tokens. Handles the
+    optional CLS token by checking whether total_tokens == T*S or T*S+1.
+    """
+    cfg = model.config
+    num_frames = getattr(cfg, "num_frames", None) or getattr(cfg, "frames_per_clip", 64)
+    tubelet_size = getattr(cfg, "tubelet_size", 2)
+    image_size = getattr(cfg, "image_size", 256)
+    patch_size = getattr(cfg, "patch_size", 16)
+    if isinstance(image_size, (list, tuple)):
+        image_size = image_size[-1]
+    if isinstance(patch_size, (list, tuple)):
+        patch_size = patch_size[-1]
+    t_tok = num_frames // tubelet_size
+    s_tok = (image_size // patch_size) ** 2
+    expected = t_tok * s_tok
+    if total_tokens in (expected, expected + 1):
+        return t_tok, s_tok
+    # Fallback: divide by t_tok.
+    logger.warning(
+        "Token count %d doesn't match config-derived T=%d S=%d (expected %d). "
+        "Falling back to s_tok = total // t_tok.",
+        total_tokens, t_tok, s_tok, expected,
+    )
+    return t_tok, total_tokens // t_tok
 
 
 class EmbeddingPrecomputer:
@@ -74,7 +103,7 @@ class EmbeddingPrecomputer:
 
     @torch.no_grad()
     def compute_vjepa_embedding(self, frames: list[np.ndarray]) -> torch.Tensor:
-        """Compute a V-JEPA embedding from video frames.
+        """Compute V-JEPA temporal token embeddings.
 
         Parameters
         ----------
@@ -83,14 +112,19 @@ class EmbeddingPrecomputer:
 
         Returns
         -------
-        A ``(1024,)`` tensor — the mean-pooled last hidden state.
+        A ``(T, 1024)`` tensor — T temporal tokens, each spatially mean-pooled
+        over the spatial patch dimension.
         """
         inputs = self.vjepa_processor(frames, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         outputs = self.vjepa_model(**inputs)
-        # Mean-pool over the spatial/temporal token dimension.
-        embedding = outputs.last_hidden_state.squeeze(0).mean(dim=0)
-        return embedding.cpu()
+        hidden = outputs.last_hidden_state.squeeze(0)  # (N_tok, 1024)
+        t_tok, s_tok = _get_token_dims(self.vjepa_model, hidden.shape[0])
+        # Strip CLS token if present.
+        if hidden.shape[0] == t_tok * s_tok + 1:
+            hidden = hidden[1:]
+        hidden = hidden.view(t_tok, s_tok, hidden.shape[-1])  # (T, S, 1024)
+        return hidden.mean(dim=1).cpu()  # (T, 1024)
 
     @torch.no_grad()
     def compute_clip_image_embedding(
@@ -171,7 +205,7 @@ class EmbeddingPrecomputer:
         video_ids:
             List of video identifier strings.
         jepa_embs:
-            ``(N, 1024)`` V-JEPA embeddings.
+            ``(N, T, 1024)`` V-JEPA temporal token embeddings.
         clip_image_embs:
             ``(N, F, 768)`` per-frame CLIP image embeddings.
         clip_text_embs:

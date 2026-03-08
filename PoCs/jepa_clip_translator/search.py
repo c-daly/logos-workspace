@@ -31,20 +31,43 @@ logger = logging.getLogger(__name__)
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_embeddings(path: str, device: torch.device) -> tuple[dict, dict, dict]:
-    """Load train/val/test splits from HDF5. Returns (train, val, test) dicts."""
-    splits = {}
+def load_embeddings(
+    path: str,
+    device: torch.device,
+    val_fraction: float = 0.15,
+    test_fraction: float = 0.15,
+    seed: int = 42,
+) -> tuple[dict, dict, dict]:
+    """Load embeddings from flat HDF5 and split into train/val/test."""
     with h5py.File(path, "r") as f:
-        for name in ("train", "val", "test"):
-            grp = f[name]
-            splits[name] = {
-                "jepa": torch.tensor(np.array(grp["vjepa"]), dtype=torch.float32).to(device),
-                "clip_image": torch.tensor(np.array(grp["clip_image"]), dtype=torch.float32).to(device),
-                "clip_text": torch.tensor(np.array(grp["clip_text"]), dtype=torch.float32).to(device),
-            }
-    for name, data in splits.items():
-        logger.info("%s: %d samples", name, data["jepa"].shape[0])
-    return splits["train"], splits["val"], splits["test"]
+        jepa = torch.tensor(np.array(f["jepa_embeddings"]), dtype=torch.float32)
+        clip_image = torch.tensor(np.array(f["clip_image_embeddings"]), dtype=torch.float32)
+        clip_text = torch.tensor(np.array(f["clip_text_embeddings"]), dtype=torch.float32)
+
+    n = jepa.shape[0]
+    rng = np.random.RandomState(seed)
+    perm = rng.permutation(n)
+
+    n_test = int(n * test_fraction)
+    n_val = int(n * val_fraction)
+    test_idx = perm[:n_test]
+    val_idx = perm[n_test:n_test + n_val]
+    train_idx = perm[n_test + n_val:]
+
+    def _split(idx):
+        return {
+            "jepa": jepa[idx].to(device),
+            "clip_image": clip_image[idx].to(device),
+            "clip_text": clip_text[idx].to(device),
+        }
+
+    train, val, test = _split(train_idx), _split(val_idx), _split(test_idx)
+    for name, data in (("train", train), ("val", val), ("test", test)):
+        logger.info("%s: %d samples  jepa=%s  clip_image=%s",
+                    name, data["jepa"].shape[0],
+                    tuple(data["jepa"].shape[1:]),
+                    tuple(data["clip_image"].shape[1:]))
+    return train, val, test
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +174,6 @@ def run_experiment(
         train_loss_sum = 0.0
         for batch_jepa, batch_clip_img, batch_clip_txt in train_loader:
             batch_jepa = _augment(batch_jepa, cfg)
-            batch_clip_img = _avg_frames(batch_clip_img, cfg.data.num_frames)
             optimizer.zero_grad()
             pred = model(batch_jepa)
             result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
@@ -166,7 +188,6 @@ def run_experiment(
         val_batches = 0
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
-                batch_clip_img = _avg_frames(batch_clip_img, cfg.data.num_frames)
                 pred = model(batch_jepa)
                 result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
                 val_loss_sum += result["loss"].item()
@@ -239,11 +260,20 @@ def evaluate_best(result: dict, test_data: dict, device: torch.device) -> dict:
     model.eval()
 
     translated = model(test_data["jepa"])
-    img_metrics = compute_retrieval_metrics(translated, test_data["clip_image"])
-    txt_metrics = compute_retrieval_metrics(translated, test_data["clip_text"][:, 0, :])
 
-    translated_n = F.normalize(translated, dim=-1)
-    clip_n = F.normalize(test_data["clip_image"], dim=-1)
+    # Pool token dimension for retrieval and cosine sim.
+    if translated.dim() == 3:
+        translated_pooled = translated.mean(dim=1)
+        clip_image_pooled = test_data["clip_image"].mean(dim=1)
+    else:
+        translated_pooled = translated
+        clip_image_pooled = test_data["clip_image"]
+
+    img_metrics = compute_retrieval_metrics(translated_pooled, clip_image_pooled)
+    txt_metrics = compute_retrieval_metrics(translated_pooled, test_data["clip_text"][:, 0, :])
+
+    translated_n = F.normalize(translated_pooled, dim=-1)
+    clip_n = F.normalize(clip_image_pooled, dim=-1)
     cos = (translated_n * clip_n).sum(dim=-1)
 
     return {
