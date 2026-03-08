@@ -94,38 +94,38 @@ class EmbeddingPrecomputer:
 
     @torch.no_grad()
     def compute_clip_image_embedding(
-        self, frames: list[np.ndarray], sample_frames: int = 8
+        self, frames: list[np.ndarray], sample_frames: int = 64
     ) -> torch.Tensor:
-        """Compute a CLIP image embedding by averaging sampled frames.
+        """Compute per-frame CLIP image embeddings.
 
         Parameters
         ----------
         frames:
             List of RGB numpy arrays.
         sample_frames:
-            Number of frames to uniformly sample.
+            Number of frames to uniformly sample.  Always returns exactly this
+            many embeddings — short videos will have repeated frames to ensure
+            a uniform output shape across all videos.
 
         Returns
         -------
-        A ``(768,)`` L2-normalised tensor.
+        A ``(sample_frames, 768)`` L2-normalised tensor (one row per frame).
         """
         n = len(frames)
-        if n <= sample_frames:
-            sampled = frames
-        else:
-            indices = np.linspace(0, n - 1, sample_frames, dtype=int)
-            sampled = [frames[i] for i in indices]
+        indices = np.linspace(0, n - 1, sample_frames, dtype=int)
+        sampled = [frames[i] for i in indices]
 
         embeddings = []
         for frame in sampled:
             inputs = self.clip_processor(images=frame, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            emb = self.clip_model.get_image_features(**inputs)
-            embeddings.append(emb.squeeze(0))
+            raw = self.clip_model.get_image_features(**inputs)
+            # Older transformers versions return a tensor; newer may return a
+            # ModelOutput with .pooler_output.
+            feat = raw.pooler_output if hasattr(raw, "pooler_output") else raw
+            embeddings.append(F.normalize(feat.squeeze(0), p=2, dim=-1))
 
-        avg = torch.stack(embeddings).mean(dim=0)
-        avg = F.normalize(avg, p=2, dim=-1)
-        return avg.cpu()
+        return torch.stack(embeddings).cpu()  # (sample_frames, 768)
 
     @torch.no_grad()
     def compute_clip_text_embeddings(
@@ -146,9 +146,9 @@ class EmbeddingPrecomputer:
             text=captions, return_tensors="pt", padding=True, truncation=True
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        emb = self.clip_model.get_text_features(**inputs)
-        emb = F.normalize(emb, p=2, dim=-1)
-        return emb.cpu()
+        raw = self.clip_model.get_text_features(**inputs)
+        feat = raw.pooler_output if hasattr(raw, "pooler_output") else raw
+        return F.normalize(feat, p=2, dim=-1).cpu()
 
     # ------------------------------------------------------------------
     # HDF5 persistence
@@ -173,7 +173,7 @@ class EmbeddingPrecomputer:
         jepa_embs:
             ``(N, 1024)`` V-JEPA embeddings.
         clip_image_embs:
-            ``(N, 768)`` CLIP image embeddings.
+            ``(N, F, 768)`` per-frame CLIP image embeddings.
         clip_text_embs:
             ``(N, C, 768)`` CLIP text embeddings (C captions per video).
         """
@@ -208,7 +208,9 @@ class EmbeddingPrecomputer:
         """
         with h5py.File(path, "r") as f:
             jepa = torch.from_numpy(np.array(f["jepa_embeddings"]))
-            clip_image = torch.from_numpy(np.array(f["clip_image_embeddings"]))
+            clip_image = torch.from_numpy(
+                np.array(f["clip_image_embeddings"])
+            )  # (N, F, 768) per-frame
             clip_text = torch.from_numpy(np.array(f["clip_text_embeddings"]))
 
         n = jepa.shape[0]
@@ -244,22 +246,25 @@ def main() -> None:
         description="Pre-compute V-JEPA and CLIP embeddings for MSR-VTT videos."
     )
     parser.add_argument(
+        "--data",
         "--data-dir",
+        dest="data_dir",
         type=str,
-        default="data/msrvtt",
-        help="Root directory for MSR-VTT data (default: data/msrvtt).",
+        default="data",
+        help="Root directory for MSR-VTT data (default: data).  "
+             "Expects <data>/videos/*.mp4 and <data>/annotations.json.",
     )
     parser.add_argument(
         "--output",
         type=str,
-        default="data/embeddings.h5",
-        help="Output HDF5 file path (default: data/embeddings.h5).",
+        default="msrvtt_embeddings.h5",
+        help="Output HDF5 file path (default: msrvtt_embeddings.h5).",
     )
     parser.add_argument(
         "--subset-size",
         type=int,
-        default=50,
-        help="Number of videos to process (default: 50).",
+        default=None,
+        help="Number of videos to process (default: all).",
     )
     parser.add_argument(
         "--max-frames",
@@ -270,8 +275,9 @@ def main() -> None:
     parser.add_argument(
         "--clip-sample-frames",
         type=int,
-        default=8,
-        help="Number of frames to sample for CLIP image encoder (default: 8).",
+        default=64,
+        help="Frames to sample for CLIP image encoder; stored per-frame as "
+             "(N, F, 768) (default: 64).",
     )
     parser.add_argument(
         "--max-captions",
@@ -293,14 +299,17 @@ def main() -> None:
     )
 
     # 1. Load data --------------------------------------------------------
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent))
     from data_loader import MSRVTTLoader
 
-    loader = MSRVTTLoader(data_dir=args.data_dir, subset_size=args.subset_size)
+    loader = MSRVTTLoader(data_dir=args.data_dir, subset_size=args.subset_size or 0)
     ann_path = loader.ensure_data()
     videos, captions = loader.parse_annotations(str(ann_path))
 
-    # Take the requested subset.
-    videos = videos[: args.subset_size]
+    # Take the requested subset (None = all).
+    if args.subset_size:
+        videos = videos[: args.subset_size]
     video_ids = [v["video_id"] for v in videos]
     logger.info("Processing %d videos.", len(video_ids))
 

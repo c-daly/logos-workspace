@@ -1,43 +1,64 @@
 """Experiment configuration schema and defaults."""
 
-from dataclasses import dataclass, field, asdict
-from typing import Literal
+from __future__ import annotations
+
 import json
+from dataclasses import asdict, dataclass, field
+from typing import Literal
 
 
 @dataclass
 class ArchitectureConfig:
     type: Literal["linear", "mlp", "residual"] = "linear"
     hidden_dim: int = 512
-    num_blocks: int = 0  # only for residual
+    num_blocks: int = 0
+    num_layers: int = 1
     dropout: float = 0.1
-    activation: str = "gelu"
+    activation: Literal["gelu", "relu", "silu"] = "gelu"
+    use_layer_norm: bool = True
 
 
 @dataclass
-class TrainingConfig:
-    optimizer: str = "adamw"
-    lr: float = 3e-4
-    weight_decay: float = 0.05
-    batch_size: int = 64
-    max_epochs: int = 20
-    early_stop_patience: int = 5
-    grad_clip: float = 1.0
+class LossTerm:
+    function: Literal["mse", "cosine", "contrastive"] = "mse"
+    target: Literal["clip_image", "clip_text_mean", "clip_text_first"] = "clip_image"
+    weight: float = 1.0
+    temperature: float = 0.07
+    label_smoothing: float = 0.0
 
 
 @dataclass
 class LossConfig:
-    type: Literal["mse", "cosine", "contrastive", "combined"] = "combined"
-    contrastive_weight: float = 0.7
-    cosine_weight: float = 0.3
-    temperature: float = 0.07
+    terms: list = field(default_factory=lambda: [
+        {"function": "mse", "target": "clip_image", "weight": 1.0,
+         "temperature": 0.07, "label_smoothing": 0.0},
+    ])
+    warmup_terms: list = field(default_factory=list)
+    warmup_epochs: int = 0
+
+
+@dataclass
+class TrainingConfig:
+    optimizer: Literal["adamw", "adam", "sgd"] = "adamw"
+    lr: float = 3e-4
+    lr_min: float = 1e-6
+    lr_schedule: Literal["cosine", "step", "none"] = "cosine"
+    warmup_epochs: int = 10
+    cooldown_epochs: int = 20
+    cooldown_lr: float = 1e-6
+    weight_decay: float = 0.05
+    batch_size: int = 256
+    max_epochs: int = 200
+    early_stop_patience: int = 10
+    grad_clip: float = 1.0
 
 
 @dataclass
 class DataConfig:
-    subset_size: int = 50  # number of videos
+    noise_std: float = 0.0
+    embedding_dropout: float = 0.0
     val_fraction: float = 0.15
-    clip_sample_frames: int = 8
+    num_frames: int | None = None  # frames to average for clip_image target; None = all
 
 
 @dataclass
@@ -50,21 +71,38 @@ class ExperimentConfig:
     vjepa_dim: int = 1024
     clip_dim: int = 768
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return asdict(self)
 
-    def to_json(self, path: str):
+    def to_json(self, path: str) -> None:
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExperimentConfig":
+        fields = ArchitectureConfig.__dataclass_fields__
         return cls(
             experiment_id=d.get("experiment_id", "exp_001"),
-            architecture=ArchitectureConfig(**d.get("architecture", {})),
-            training=TrainingConfig(**d.get("training", {})),
-            loss=LossConfig(**d.get("loss", {})),
-            data=DataConfig(**d.get("data", {})),
+            architecture=ArchitectureConfig(
+                **{k: v for k, v in d.get("architecture", {}).items() if k in fields}
+            ),
+            training=TrainingConfig(
+                **{k: v for k, v in d.get("training", {}).items()
+                   if k in TrainingConfig.__dataclass_fields__}
+            ),
+            loss=LossConfig(
+                **{k: v for k, v in d.get("loss", {}).items()
+                   if k in LossConfig.__dataclass_fields__}
+            ),
+            data=DataConfig(
+                **{k: v for k, v in d.get("data", {}).items()
+                   if k in DataConfig.__dataclass_fields__}
+            ),
             vjepa_dim=d.get("vjepa_dim", 1024),
             clip_dim=d.get("clip_dim", 768),
         )
+
+    @classmethod
+    def from_json(cls, path: str) -> "ExperimentConfig":
+        with open(path) as f:
+            return cls.from_dict(json.load(f))

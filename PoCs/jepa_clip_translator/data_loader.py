@@ -45,7 +45,11 @@ class MSRVTTLoader:
     def ensure_data(self) -> pathlib.Path:
         """Make sure annotations (and optionally videos) are available.
 
-        Downloads the MSR-VTT annotation JSON if it is not already present.
+        Looks for annotation files in this order:
+          1. ``annotations.json`` (produced by the HuggingFace extraction notebook)
+          2. ``MSRVTT_data.json`` (downloaded from CLIP4Clip)
+
+        If neither exists, downloads ``MSRVTT_data.json`` from CLIP4Clip.
         For videos, checks for a local ``videos/`` directory first; if absent
         it looks for the ``MSRVTT_VIDEOS_URL`` environment variable and falls
         back to printing user instructions.
@@ -53,10 +57,15 @@ class MSRVTTLoader:
         Returns the path to the annotation JSON file.
         """
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        ann_path = self.data_dir / "MSRVTT_data.json"
 
-        # 1. Annotations --------------------------------------------------
-        if not ann_path.exists():
+        # 1. Annotations — accept either filename produced by the two workflows
+        for candidate in ("annotations.json", "MSRVTT_data.json"):
+            ann_path = self.data_dir / candidate
+            if ann_path.exists():
+                logger.info("Found annotations at %s", ann_path)
+                break
+        else:
+            ann_path = self.data_dir / "MSRVTT_data.json"
             logger.info("Downloading MSR-VTT annotations …")
             self._download_file(ANNOTATIONS_URL, ann_path)
             logger.info("Annotations saved to %s", ann_path)
