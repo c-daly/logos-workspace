@@ -28,6 +28,7 @@ next_site/
 # Handoff notes
 HANDOFF.md
 **/HANDOFF.md
+**/handoffs/
 
 # PoCs artifacts (generated caches, personal files, references)
 PoCs/embedding_cache.json

@@ -1,0 +1,8 @@
+torch>=2.0
+transformers>=4.40
+h5py
+numpy
+av
+tqdm
+Pillow
+scikit-learn
