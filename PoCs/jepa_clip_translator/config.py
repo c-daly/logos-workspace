@@ -58,7 +58,7 @@ class DataConfig:
     noise_std: float = 0.0
     embedding_dropout: float = 0.0
     val_fraction: float = 0.15
-    num_frames: int | None = None  # frames to average for clip_image target; None = all
+    num_tokens: int | None = None  # tokens/frames to use at training time; None = all stored
 
 
 @dataclass

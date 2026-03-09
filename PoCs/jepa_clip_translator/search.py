@@ -95,12 +95,33 @@ def _get_lr(epoch: int, cfg: ExperimentConfig) -> float:
 # Data augmentation
 # ---------------------------------------------------------------------------
 
-def _avg_frames(clip_img: torch.Tensor, num_frames: int | None) -> torch.Tensor:
-    """Average CLIP frame embeddings. Handles 2D [N,D] (already averaged) and 3D [N,F,D]."""
-    if clip_img.dim() == 3:
-        frames = clip_img[:, :num_frames, :] if num_frames is not None else clip_img
-        return frames.mean(dim=1)
-    return clip_img
+def _prepare_batch(
+    batch_jepa: torch.Tensor,
+    batch_clip_img: torch.Tensor,
+    num_tokens: int | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Align JEPA and CLIP tensors for the loss, handling both embedding formats.
+
+    Legacy (mean-pooled JEPA): jepa is (B, 1024). CLIP frames are averaged
+    down to (B, 768) so the task remains vector-to-vector.
+
+    Token-level JEPA: jepa is (B, T, 1024). CLIP frames are subsampled to
+    match, giving (B, K, 768). num_tokens controls K (None = use all T).
+    """
+    if batch_jepa.dim() == 3:
+        T = batch_jepa.shape[1]
+        K = min(num_tokens, T) if num_tokens else T
+        if K < T:
+            idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
+            batch_jepa = batch_jepa[:, idx, :]
+            batch_clip_img = batch_clip_img[:, idx, :]
+    else:
+        # Legacy: average CLIP frames to match the single JEPA vector.
+        F = batch_clip_img.shape[1] if batch_clip_img.dim() == 3 else None
+        if F is not None:
+            K = min(num_tokens, F) if num_tokens else F
+            batch_clip_img = batch_clip_img[:, :K, :].mean(dim=1)
+    return batch_jepa, batch_clip_img
 
 
 def _augment(x: torch.Tensor, cfg: ExperimentConfig) -> torch.Tensor:
@@ -173,6 +194,7 @@ def run_experiment(
         model.train()
         train_loss_sum = 0.0
         for batch_jepa, batch_clip_img, batch_clip_txt in train_loader:
+            batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
             batch_jepa = _augment(batch_jepa, cfg)
             optimizer.zero_grad()
             pred = model(batch_jepa)
@@ -188,6 +210,7 @@ def run_experiment(
         val_batches = 0
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
+                batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
                 pred = model(batch_jepa)
                 result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
                 val_loss_sum += result["loss"].item()
@@ -261,13 +284,13 @@ def evaluate_best(result: dict, test_data: dict, device: torch.device) -> dict:
 
     translated = model(test_data["jepa"])
 
-    # Pool token dimension for retrieval and cosine sim.
-    if translated.dim() == 3:
-        translated_pooled = translated.mean(dim=1)
-        clip_image_pooled = test_data["clip_image"].mean(dim=1)
-    else:
-        translated_pooled = translated
-        clip_image_pooled = test_data["clip_image"]
+    # Reduce to (N, D) for retrieval — pool tokens if present.
+    translated_pooled = translated.mean(dim=1) if translated.dim() == 3 else translated
+    clip_image_pooled = (
+        test_data["clip_image"].mean(dim=1)
+        if test_data["clip_image"].dim() == 3
+        else test_data["clip_image"]
+    )
 
     img_metrics = compute_retrieval_metrics(translated_pooled, clip_image_pooled)
     txt_metrics = compute_retrieval_metrics(translated_pooled, test_data["clip_text"][:, 0, :])

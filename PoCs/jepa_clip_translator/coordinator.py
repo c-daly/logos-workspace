@@ -42,7 +42,7 @@ Schema (all fields optional — only include what you're changing from defaults)
 - loss.terms: [{function (mse|cosine|contrastive), target (clip_image|clip_text_mean|clip_text_first), weight, temperature (0.01-1.0), label_smoothing (0.0-0.2)}]
 - loss.warmup_terms: loss mix for first warmup_epochs epochs; loss.warmup_epochs: int
 - training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256|512|1024), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
-- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3)
+- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3), num_tokens (int or null) — for token-level JEPA: number of temporal tokens to use (null = all); for legacy mean-pooled JEPA: number of CLIP frames to average (null = all)
 
 Respond with:
 
