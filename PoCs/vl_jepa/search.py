@@ -359,6 +359,10 @@ def _run_experiment_inner(
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
+            logger.info(
+                 CONTEXT.md CORE_PROTOCOL.md PARALLELISM.md README.md agent_context.md agents bin commands config context dashboard data docs enhanced_telemetry examples hooks infra lib logs mypy.ini poetry.lock pyproject.toml run_tests.sh scripts skills tests uv.lock best @ epoch %d loss=%.4f cos=%.4f R@1=%.3f R@5=%.3f,
+                epoch, avg_val_loss, avg_val_cos, val_r1, val_r5,
+            )
         else:
             patience_counter += 1
 
