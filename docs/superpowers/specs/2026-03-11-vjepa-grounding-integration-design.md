@@ -42,7 +42,7 @@ The central thesis this design supports: **cognition in LOGOS is not grounded in
 | `grounded_embeddings` | Milvus (shared) | 768-dim CLIP-space embeddings from V-JEPA |
 | `grounded_embedding_id` | Neo4j node property | FK into `grounded_embeddings` collection |
 | `ingestion` pipeline | sophia | Extracts V-JEPA tokens, calls Hermes, submits proposal |
-| `CWM-G` | sophia | During planning, translates simulation states and queries grounded store |
+| `CWM-G` | sophia | One layer of the unified CWM; emits `CWMState(model_type="CWM_G")` via `CWMPersistence`; during planning episodes, queries grounded store without persisting |
 | `JEPARunner` | sophia | Produces `SimulationResult` → fed to CWM-G (see Open Question 5) |
 
 ### Why Hermes
@@ -223,7 +223,27 @@ The reflection step uses language as a tool (LLM for relation labelling) but is 
 
 ## CWM-G Integration
 
-`CWM-G` (`sophia/src/sophia/cwm_g/memory.py`) is currently a stub with a generic buffer. This design gives it its first real behaviour:
+CWM-G is **not a separate system** — it is one layer of a unified working memory alongside CWM-A (abstract) and CWM-E (emotional). All three layers use the same `CWMState` envelope and write through `CWMPersistence` to the same Neo4j-backed cognitive state log. Sophia's API can retrieve any layer's history with `GET /cwm/states?model_type=cwm_g`.
+
+Grounded observations from video ingestion are persisted:
+
+```python
+state = CWMState(
+    model_type="CWM_G",
+    data={
+        "source": "cwm_g_service",
+        "derivation": "observed",
+        "confidence": 0.85,
+        "grounded_embedding_id": embedding_id,
+        "node_uuid": node_uuid,
+        "modality": "visual",
+        "tags": ["cwm", "subsystem:cwm_g"],
+    }
+)
+await cwm_persistence.persist(state)
+```
+
+Planning states are **ephemeral** — they are not persisted. During a planning episode CWM-G translates the planning state and queries the grounded store in-memory only:
 
 ```python
 class ContinuousWorkingMemoryGenerative:
@@ -232,19 +252,21 @@ class ContinuousWorkingMemoryGenerative:
         vjepa_tokens: Tensor,          # (T, 1024) from JEPARunner
         hermes_client: HermesClient,
     ) -> GroundedPlanningState:
-        """Translate a planning state to CLIP space and find similar known nodes."""
+        """Translate a planning state to CLIP space and find similar known nodes.
+        Result is ephemeral — not persisted to CWMPersistence.
+        """
         embedding = await hermes_client.embed_vjepa(vjepa_tokens, mode="query")
         similar_nodes = await hermes_client.search_grounded(embedding, top_k=5)
         return GroundedPlanningState(embedding=embedding, similar_nodes=similar_nodes)
 ```
 
-No persistence. The returned `GroundedPlanningState` lives in the planner's call stack for the duration of the planning episode.
+The returned `GroundedPlanningState` lives in the planner's call stack only. When the planning episode ends, it is discarded — no CWMState is emitted.
 
 ---
 
 ## Forward Compatibility (Embodiment)
 
-When Talos sensors arrive, the only change needed is a new input source: sensor frame → V-JEPA encoder → `POST /embed/vjepa`. The Hermes endpoint, Milvus collection, Neo4j schema, and proposal pipeline are all source-agnostic. CWM-G's `ground_planning_state` generalises to `ground_perception_state` with the same interface.
+When Talos sensors arrive, the only change needed is a new input source: sensor frame → V-JEPA encoder → `POST /embed/vjepa`. The Hermes endpoint, Milvus collection, Neo4j schema, and proposal pipeline are all source-agnostic. Sensor-derived observations will be persisted as `CWMState(model_type="CWM_G")` entries just like video-ingestion observations — they join the same cognitive state log. CWM-G's `ground_planning_state` generalises to `ground_perception_state` with the same interface.
 
 ---
 
