@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# On-pod search launcher. Required: ANTHROPIC_API_KEY, POD_ID, RUNPOD_API_KEY
+# On-pod search launcher. Required: OPENAI_API_KEY, POD_ID, RUNPOD_API_KEY
 # Optional: ROUNDS=10 CPR=3 MAX_EXPERIMENTS=150 TARGET_R5=0.82 CONV_PATIENCE=4
 set -e
 
@@ -34,7 +34,7 @@ TRAIN_CMD="cd $WORKSPACE && python search.py \
   --target-metric val_cosine_sim --target-value $TARGET_R5 \
   --convergence-patience $CONV_PATIENCE \
   --resume --output $WORKSPACE/experiment_log.json \
-  --llm-provider anthropic 2>&1 | tee $LOG"
+  --llm-provider openai 2>&1 | tee $LOG"
 
 tmux new-session -d -s search "bash -c '$TRAIN_CMD; $STOP_CMD'"
 
