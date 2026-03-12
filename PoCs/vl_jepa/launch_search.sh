@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 H5="$HOME/projects/LOGOS/PoCs/jepa_clip_translator/msrvtt_embeddings.h5"
 SSH_USER="${POD_ID}-root"
 SSH_HOST="ssh.runpod.io"
-SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no"
+SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 echo "=== VL-JEPA Launch === Pod: $POD_ID"
 
@@ -40,7 +40,7 @@ sleep 5
 
 echo "--- Uploading vl_jepa/ ---"
 $SSH "$SSH_USER@$SSH_HOST" "mkdir -p /workspace/vl_jepa"
-rsync -avz --progress -e "$SSH" "$SCRIPT_DIR/" "$SSH_USER@$SSH_HOST:/workspace/vl_jepa/"
+rsync -avz --progress --exclude="*.pt" --exclude="*.h5" -e "$SSH" "$SCRIPT_DIR/" "$SSH_USER@$SSH_HOST:/workspace/vl_jepa/"
 
 echo "--- Uploading msrvtt_embeddings.h5 (skips if unchanged) ---"
 rsync -avz --progress --ignore-existing -e "$SSH" "$H5" "$SSH_USER@$SSH_HOST:/workspace/"

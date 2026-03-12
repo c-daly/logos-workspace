@@ -22,9 +22,9 @@ import torch; n=torch.cuda.device_count(); print(f'GPUs: {n}')
 pip install -q -r $WORKSPACE/requirements.txt
 
 if [ -n "$POD_ID" ] && [ -n "$RUNPOD_API_KEY" ]; then
-    STOP_CMD="curl -s -X POST https://api.runpod.io/v2/pod/$POD_ID/stop -H 'Authorization: Bearer $RUNPOD_API_KEY' && echo 'Pod stop requested.'"
+    STOP_CMD="curl -s -X POST https://api.runpod.io/v2/pod/$POD_ID/stop -H \"Authorization: Bearer $RUNPOD_API_KEY\" && echo Pod stop requested."
 else
-    STOP_CMD="echo 'No POD_ID/RUNPOD_API_KEY set -- pod will not auto-stop.'"
+    STOP_CMD="echo No POD_ID/RUNPOD_API_KEY set -- pod will not auto-stop."
 fi
 
 TRAIN_CMD="cd $WORKSPACE && python search.py \
