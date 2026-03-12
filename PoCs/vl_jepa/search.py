@@ -432,15 +432,21 @@ def run_search(
     train_data, val_data, test_data = load_embeddings(embeddings_path, device)
 
     all_results: list[dict] = _load_existing_log(output_path) if resume else []
+    warm_start = resume and bool(all_results)
+    if warm_start:
+        logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
     best_val_loss = float("inf")
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
         logger.info("\n%s\n# ROUND %d/%d\n%s", "#" * 70, round_num, max_rounds, "#" * 70)
 
-        configs = generate_round1_configs() if round_num == 1 else generate_next_configs(
-            all_results, num_configs=configs_per_round, llm_config=llm_config,
-            rounds_without_improvement=rounds_without_improvement,
+        configs = (
+            generate_round1_configs() if round_num == 1 and not warm_start
+            else generate_next_configs(
+                all_results, num_configs=configs_per_round, llm_config=llm_config,
+                rounds_without_improvement=rounds_without_improvement,
+            )
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
