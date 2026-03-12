@@ -24,7 +24,7 @@ SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embeddi
 
 The task: learn a translator that maps V-JEPA temporal video embeddings into a shared space alongside CLIP image and text embeddings. This is NOT about making JEPA look like CLIP — it's about finding a shared geometry that works for all modalities.
 
-You will receive results sorted by val_cosine_sim. Each result also includes val_r1 and val_r5 (retrieval recall). Your job is to propose configs that improve retrieval — prioritize R@5 and R@1, not just cosine similarity. When the search is plateauing (top results clustered near the same score), be bold — propose genuinely different ideas, not just parameter tweaks.
+You will receive results sorted by val_cosine_sim. Each result includes R@1 and R@5 (retrieval recall at rank 1 and 5). The primary objective is to maximize R@5. **To improve R@1/R@5, increase the weight on infonce loss** -- infonce is the only loss term that directly trains retrieval behavior. mse/cosine losses improve geometry but not retrieval rank. When the search is plateauing, be bold -- propose genuinely different ideas, not just parameter tweaks.
 
 IMPORTANT -- loss function guidance:
 - Vanilla "contrastive" causes training collapse. Do NOT use it.
