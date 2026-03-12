@@ -226,25 +226,6 @@ def run_experiment(
     val_data: dict,
     device: torch.device,
 ) -> dict:
-    import os as _os
-    _log_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "run_logs")
-    _os.makedirs(_log_dir, exist_ok=True)
-    _fh = logging.FileHandler(_os.path.join(_log_dir, f"{cfg.experiment_id}.log"))
-    _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
-    logging.getLogger().addHandler(_fh)
-    try:
-     return _run_experiment_inner(cfg, train_data, val_data, device)
-    finally:
-        logging.getLogger().removeHandler(_fh)
-        _fh.close()
-
-
-def _run_experiment_inner(
-    cfg: ExperimentConfig,
-    train_data: dict,
-    val_data: dict,
-    device: torch.device,
-) -> dict:
     train_loader = DataLoader(
         TensorDataset(train_data["jepa"], train_data["clip_image"], train_data["clip_text"]),
         batch_size=cfg.training.batch_size, shuffle=True, drop_last=True,
@@ -360,7 +341,7 @@ def _run_experiment_inner(
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
             logger.info(
-                 CONTEXT.md CORE_PROTOCOL.md PARALLELISM.md README.md agent_context.md agents bin commands config context dashboard data docs enhanced_telemetry examples hooks infra lib logs mypy.ini poetry.lock pyproject.toml run_tests.sh scripts skills tests uv.lock best @ epoch %d loss=%.4f cos=%.4f R@1=%.3f R@5=%.3f,
+                "  *** best @ epoch %d  loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f",
                 epoch, avg_val_loss, avg_val_cos, val_r1, val_r5,
             )
         else:
@@ -593,6 +574,15 @@ def main() -> None:
         format="%(asctime)s %(message)s",
         datefmt="%H:%M:%S",
     )
+    import os as _os
+    from datetime import datetime as _dt
+    _log_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "run_logs")
+    _os.makedirs(_log_dir, exist_ok=True)
+    _run_log = _os.path.join(_log_dir, "run_" + _dt.now().strftime("%Y%m%d_%H%M%S") + ".log")
+    _fh = logging.FileHandler(_run_log)
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(_fh)
+    logging.getLogger(__name__).info("Run log: %s", _run_log)
 
     device = torch.device(args.device)
     logger.info("Device: %s", device)
