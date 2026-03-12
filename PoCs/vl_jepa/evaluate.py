@@ -105,13 +105,14 @@ def evaluate_checkpoint(
 
     # 2. Load model from checkpoint.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_translator(cfg.architecture, cfg.vjepa_dim, cfg.clip_dim)
+    model = build_translator(cfg.architecture, cfg.vjepa_dim, cfg.clip_dim).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt.get("model_state_dict", ckpt.get("best_state", ckpt))
     model.load_state_dict({k: v.to(device) for k, v in state.items()})
     model.eval()
 
     # 3. Run validation JEPA embeddings through the translator.
+    val_jepa = val_jepa.to(device)
     translated = model(val_jepa)
 
     # 4. Image retrieval metrics: translated vs clip_image.

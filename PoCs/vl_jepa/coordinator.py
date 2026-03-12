@@ -353,6 +353,9 @@ def generate_next_configs_random(
 
         terms = d.get("loss", {}).get("terms", [])
         for term in terms:
+            # sanitize: old logs may contain contrastive from earlier experiments
+            if term.get("function") == "contrastive":
+                term["function"] = "infonce"
             if rng.random() < 0.3:
                 term["function"] = rng.choice(["mse", "cosine", "infonce"])
             if rng.random() < 0.3:
