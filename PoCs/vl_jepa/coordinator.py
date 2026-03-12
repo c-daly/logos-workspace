@@ -24,7 +24,7 @@ SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embeddi
 
 The task: learn a translator that maps V-JEPA temporal video embeddings into a shared space alongside CLIP image and text embeddings. This is NOT about making JEPA look like CLIP — it's about finding a shared geometry that works for all modalities.
 
-You will receive results sorted by val_cosine_sim. Your job is to propose configs that improve on the best result. When the search is plateauing (top results clustered near the same score), be bold — propose genuinely different ideas, not just parameter tweaks.
+You will receive results sorted by val_cosine_sim. Each result also includes val_r1 and val_r5 (retrieval recall). Your job is to propose configs that improve retrieval — prioritize R@5 and R@1, not just cosine similarity. When the search is plateauing (top results clustered near the same score), be bold — propose genuinely different ideas, not just parameter tweaks.
 
 IMPORTANT -- loss function guidance:
 - Vanilla "contrastive" causes training collapse. Do NOT use it.
@@ -122,6 +122,8 @@ def _build_history_context(all_results: list[dict], rounds_without_improvement: 
         "total_experiments": len(all_results),
         "rounds_without_improvement": rounds_without_improvement,
         "best_val_cosine_sim": sorted_all[0].get("val_cosine_sim", 0.0) if sorted_all else 0.0,
+        "best_val_r1": sorted_all[0].get("R@1", 0.0) if sorted_all else 0.0,
+        "best_val_r5": sorted_all[0].get("R@5", 0.0) if sorted_all else 0.0,
         "top10": sorted_all[:10],
         "last5_trajectory": compact[-5:],
         "architecture_counts": arch_counts,
@@ -135,6 +137,7 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, roun
     prompt = (
         f"Total experiments: {ctx['total_experiments']}  |  "
         f"Best val_cosine_sim: {ctx['best_val_cosine_sim']:.4f}  |  "
+        f"Best R@1: {ctx['best_val_r1']:.3f}  |  Best R@5: {ctx['best_val_r5']:.3f}  |  "
         f"Rounds without improvement: {ctx['rounds_without_improvement']}\n"
         f"Architecture attempts: {ctx['architecture_counts']}\n"
         + ("Status: PLATEAUING -- try something genuinely different.\n" if plateau else "")

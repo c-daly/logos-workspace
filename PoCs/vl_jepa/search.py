@@ -267,6 +267,8 @@ def run_experiment(
     best_val_loss = float("inf")
     best_epoch = 0
     best_state = None
+    best_r1 = 0.0
+    best_r5 = 0.0
     patience_counter = 0
 
     for epoch in range(1, cfg.training.max_epochs + 1):
@@ -327,6 +329,8 @@ def run_experiment(
             "train_loss": train_loss_sum / max(len(train_loader), 1),
             "val_loss": avg_val_loss,
             "val_cosine_sim": avg_val_cos,
+            "R@1": val_r1,
+            "R@5": val_r5,
             "lr": current_lr,
         })
         logger.info(
@@ -340,6 +344,8 @@ def run_experiment(
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
+            best_r1 = val_r1
+            best_r5 = val_r5
             logger.info(
                 "  *** best @ epoch %d  loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f",
                 epoch, avg_val_loss, avg_val_cos, val_r1, val_r5,
@@ -356,6 +362,8 @@ def run_experiment(
         "experiment_id": cfg.experiment_id,
         "val_loss": best_val_loss,
         "val_cosine_sim": best_cos,
+        "R@1": best_r1,
+        "R@5": best_r5,
         "epochs_trained": len(history),
         "best_epoch": best_epoch,
         "config": cfg.to_dict(),
@@ -466,9 +474,10 @@ def run_search(
             arch = _arch_desc_from_dict(r["config"]["architecture"])
             marker = " <-- best" if r["val_cosine_sim"] == round_best_cos else ""
             logger.info(
-                "  %-25s %-40s cos=%.4f loss=%.4f ep=%d%s",
-                r["experiment_id"], arch, r["val_cosine_sim"], r["val_loss"],
-                r["epochs_trained"], marker,
+                "  %-25s %-40s cos=%.4f R@1=%.3f R@5=%.3f loss=%.4f ep=%d%s",
+                r["experiment_id"], arch, r["val_cosine_sim"],
+                r.get("R@1", 0.0), r.get("R@5", 0.0),
+                r["val_loss"], r["epochs_trained"], marker,
             )
 
         if round_best < best_val_loss:
@@ -500,9 +509,10 @@ def run_search(
         arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
         logger.info(
-            "%2d. %-25s %-40s cos=%.4f loss=%.4f ep=%d%s",
-            rank, r["experiment_id"], arch, r["val_cosine_sim"], r["val_loss"],
-            r["epochs_trained"], marker,
+            "%2d. %-25s %-40s cos=%.4f R@1=%.3f R@5=%.3f loss=%.4f ep=%d%s",
+            rank, r["experiment_id"], arch, r["val_cosine_sim"],
+            r.get("R@1", 0.0), r.get("R@5", 0.0),
+            r["val_loss"], r["epochs_trained"], marker,
         )
 
     # Evaluate best on test set (only if best_state available -- skipped on pure-resume runs)

@@ -31,10 +31,10 @@ TRAIN_CMD="cd $WORKSPACE && python search.py \
   --embeddings $H5 \
   --rounds $ROUNDS --configs-per-round $CPR \
   --max-experiments $MAX_EXPERIMENTS \
-  --target-metric val_cosine_sim --target-value $TARGET_R5 \
+  --target-metric R@5 --target-value $TARGET_R5 \
   --convergence-patience $CONV_PATIENCE \
   --resume --output $WORKSPACE/experiment_log.json \
-  --llm-provider openai 2>&1 | tee $LOG"
+  --llm-provider openai --llm-model gpt-5.4 2>&1 | tee $LOG"
 
 tmux new-session -d -s search "bash -c '$TRAIN_CMD; $STOP_CMD'"
 
