@@ -223,7 +223,7 @@ def _parse_configs(text: str) -> list[ExperimentConfig]:
     if "```" in text:
         analysis = text.split("```")[0].strip()
         if analysis:
-            logger.info("\n%s\nLLM ANALYSIS:\n%s\n%s", "─" * 70, analysis, "─" * 70)
+            logger.info("\n%s\nLLM ANALYSIS:\n%s\n%s", "-" * 70, analysis, "-" * 70)
 
     # Extract JSON block
     json_str = None

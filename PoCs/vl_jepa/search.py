@@ -346,10 +346,7 @@ def run_experiment(
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
             best_r1 = val_r1
             best_r5 = val_r5
-            logger.info(
-                "  *** best @ epoch %d  loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f",
-                epoch, avg_val_loss, avg_val_cos, val_r1, val_r5,
-            )
+            logger.info("  *** new best (epoch %d)", epoch)
         else:
             patience_counter += 1
 
@@ -469,7 +466,7 @@ def run_search(
                 round_best_cos = result["val_cosine_sim"]
 
         # Round summary
-        logger.info("\n%s\nROUND %d SUMMARY:\n%s", "─" * 70, round_num, "─" * 70)
+        logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
         for r in sorted(all_results[-len(configs):], key=lambda r: -r["val_cosine_sim"]):
             arch = _arch_desc_from_dict(r["config"]["architecture"])
             marker = " <-- best" if r["val_cosine_sim"] == round_best_cos else ""
