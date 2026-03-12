@@ -92,6 +92,28 @@ def _get_lr(epoch: int, cfg: ExperimentConfig) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Architecture description helper
+# ---------------------------------------------------------------------------
+
+def _arch_desc(arch_cfg) -> str:
+    """Short human-readable description of an architecture config."""
+    if arch_cfg.stages:
+        parts = [f"{s['type']}({s.get('hidden_dim', '?')},{s.get('num_blocks', s.get('num_layers', '?'))})"
+                 for s in arch_cfg.stages]
+        return "pipeline[" + "→".join(parts) + "]"
+    return arch_cfg.type
+
+
+def _arch_desc_from_dict(arch_dict: dict) -> str:
+    """Same but from a raw dict (used when reading saved results)."""
+    if arch_dict.get("stages"):
+        parts = [f"{s['type']}({s.get('hidden_dim', '?')},{s.get('num_blocks', s.get('num_layers', '?'))})"
+                 for s in arch_dict["stages"]]
+        return "pipeline[" + "→".join(parts) + "]"
+    return arch_dict.get("type", "?")
+
+
+# ---------------------------------------------------------------------------
 # Data augmentation
 # ---------------------------------------------------------------------------
 
@@ -114,7 +136,11 @@ def _prepare_batch(
         if K < T:
             idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
             batch_jepa = batch_jepa[:, idx, :]
-            batch_clip_img = batch_clip_img[:, idx, :]
+        # Always align CLIP frames to K (CLIP may have a different frame count than T)
+        F = batch_clip_img.shape[1]
+        if F != K:
+            clip_idx = torch.linspace(0, F - 1, K, dtype=torch.long, device=batch_clip_img.device)
+            batch_clip_img = batch_clip_img[:, clip_idx, :]
     else:
         # Legacy: average CLIP frames to match the single JEPA vector.
         F = batch_clip_img.shape[1] if batch_clip_img.dim() == 3 else None
@@ -168,11 +194,10 @@ def run_experiment(
         f"{t.get('weight', 1):.1f}*{t['function']}->{t['target']}" for t in loss_terms
     )
     logger.info(
-        "\n%s\nExperiment: %s\n  arch=%s hidden=%d blocks=%d layers=%d\n"
+        "\n%s\nExperiment: %s\n  arch=%s\n"
         "  loss=[%s]\n  opt=%s lr=%.2e schedule=%s bs=%d params=%s\n%s",
         "=" * 70, cfg.experiment_id,
-        cfg.architecture.type, cfg.architecture.hidden_dim,
-        cfg.architecture.num_blocks, cfg.architecture.num_layers,
+        _arch_desc(cfg.architecture),
         term_str, cfg.training.optimizer, cfg.training.lr,
         cfg.training.lr_schedule, cfg.training.batch_size, f"{num_params:,}",
         "=" * 70,
@@ -180,6 +205,8 @@ def run_experiment(
 
     history = []
     best_val_loss = float("inf")
+    best_r5 = 0.0
+    best_r1 = 0.0
     best_epoch = 0
     best_state = None
     patience_counter = 0
@@ -208,6 +235,8 @@ def run_experiment(
         model.eval()
         val_loss_sum = val_cos_sum = 0.0
         val_batches = 0
+        _val_preds: list = []
+        _val_clips: list = []
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
@@ -218,27 +247,41 @@ def run_experiment(
                     F.normalize(pred, dim=-1) * F.normalize(batch_clip_img, dim=-1)
                 ).sum(-1).mean().item()
                 val_batches += 1
+                _val_preds.append(pred.cpu())
+                _val_clips.append(batch_clip_img.cpu())
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
         avg_val_cos = val_cos_sum / max(val_batches, 1)
+        _p = F.normalize(torch.cat(_val_preds), dim=-1)
+        _c = F.normalize(torch.cat(_val_clips), dim=-1)
+        _sim = _p @ _c.T
+        _lbl = torch.arange(len(_p))
+        val_r1 = (_sim.argmax(1) == _lbl).float().mean().item()
+        val_r5 = (_sim.topk(min(5, len(_p)), 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss_sum / max(len(train_loader), 1),
             "val_loss": avg_val_loss,
             "val_cosine_sim": avg_val_cos,
+            "R@1": val_r1,
+            "R@5": val_r5,
             "lr": current_lr,
         })
         logger.info(
-            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  lr=%.2e",
-            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, current_lr,
+            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  lr=%.2e",
+            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, current_lr,
         )
 
-        if avg_val_loss < best_val_loss:
+        if val_r5 > best_r5:
+            best_r5 = val_r5
+            best_r1 = val_r1
             best_val_loss = avg_val_loss
             best_epoch = epoch
             patience_counter = 0
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            _m = model.module if isinstance(model, nn.DataParallel) else model
+            best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
+            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f", epoch, val_r5, val_r1)
         else:
             patience_counter += 1
 
@@ -251,6 +294,8 @@ def run_experiment(
         "experiment_id": cfg.experiment_id,
         "val_loss": best_val_loss,
         "val_cosine_sim": best_cos,
+        "R@1": best_r1,
+        "R@5": best_r5,
         "epochs_trained": len(history),
         "best_epoch": best_epoch,
         "config": cfg.to_dict(),
@@ -323,7 +368,7 @@ def run_search(
     train_data, val_data, test_data = load_embeddings(embeddings_path, device)
 
     all_results: list[dict] = []
-    best_val_loss = float("inf")
+    best_r5 = 0.0
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
@@ -334,33 +379,33 @@ def run_search(
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
-        round_best = float("inf")
-        round_best_cos = 0.0
+        round_best_r5 = 0.0
+        round_best_r1 = 0.0
         for cfg in configs:
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
-            if result["val_loss"] < round_best:
-                round_best = result["val_loss"]
-                round_best_cos = result["val_cosine_sim"]
+            if result.get("R@5", 0.0) > round_best_r5:
+                round_best_r5 = result.get("R@5", 0.0)
+                round_best_r1 = result.get("R@1", 0.0)
 
         # Round summary
-        logger.info("\n%s\nROUND %d SUMMARY:\n%s", "─" * 70, round_num, "─" * 70)
-        for r in sorted(all_results[-len(configs):], key=lambda r: -r["val_cosine_sim"]):
-            arch = r["config"]["architecture"]["type"]
-            marker = " <-- best" if r["val_cosine_sim"] == round_best_cos else ""
+        logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
+        for r in sorted(all_results[-len(configs):], key=lambda r: -r.get("R@5", 0.0)):
+            arch = _arch_desc_from_dict(r["config"]["architecture"])
+            marker = " <-- best" if r.get("R@5", 0.0) == round_best_r5 else ""
             logger.info(
-                "  %-25s %-8s cos=%.4f loss=%.4f ep=%d%s",
-                r["experiment_id"], arch, r["val_cosine_sim"], r["val_loss"],
-                r["epochs_trained"], marker,
+                "  %-25s %-40s R@5=%.3f  R@1=%.3f  cos=%.4f  ep=%d%s",
+                r["experiment_id"], arch, r.get("R@5", 0.0), r.get("R@1", 0.0),
+                r["val_cosine_sim"], r["epochs_trained"], marker,
             )
 
-        if round_best < best_val_loss:
-            best_val_loss = round_best
+        if round_best_r5 > best_r5:
+            best_r5 = round_best_r5
             rounds_without_improvement = 0
-            overall_best = min(all_results, key=lambda r: r["val_loss"])
+            overall_best = max(all_results, key=lambda r: r.get("R@5", 0.0))
             logger.info(
-                "  New best: %.4f (cos=%.4f) -- %s",
-                best_val_loss, overall_best["val_cosine_sim"], overall_best["experiment_id"],
+                "  New best: R@5=%.3f  R@1=%.3f -- %s",
+                best_r5, overall_best.get("R@1", 0.0), overall_best["experiment_id"],
             )
         else:
             rounds_without_improvement += 1
@@ -373,14 +418,14 @@ def run_search(
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
-    best_result = min(all_results, key=lambda r: r["val_loss"])
-    for rank, r in enumerate(sorted(all_results, key=lambda r: -r["val_cosine_sim"]), 1):
-        arch = r["config"]["architecture"]["type"]
+    best_result = max(all_results, key=lambda r: r.get("R@5", 0.0))
+    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get("R@5", 0.0)), 1):
+        arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
         logger.info(
-            "%2d. %-25s %-8s cos=%.4f loss=%.4f ep=%d%s",
-            rank, r["experiment_id"], arch, r["val_cosine_sim"], r["val_loss"],
-            r["epochs_trained"], marker,
+            "%2d. %-25s %-40s R@5=%.3f  R@1=%.3f  cos=%.4f  ep=%d%s",
+            rank, r["experiment_id"], arch, r.get("R@5", 0.0), r.get("R@1", 0.0),
+            r["val_cosine_sim"], r["epochs_trained"], marker,
         )
 
     # Evaluate best on test set
