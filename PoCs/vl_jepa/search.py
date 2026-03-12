@@ -264,11 +264,11 @@ def run_experiment(
     )
 
     history = []
-    best_val_loss = float("inf")
+    best_val_loss = float("inf")  # for reporting only
+    best_r5 = 0.0  # primary: used for checkpoint + early stopping
+    best_r1 = 0.0
     best_epoch = 0
     best_state = None
-    best_r1 = 0.0
-    best_r5 = 0.0
     patience_counter = 0
 
     for epoch in range(1, cfg.training.max_epochs + 1):
@@ -338,15 +338,15 @@ def run_experiment(
             epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, current_lr,
         )
 
-        if avg_val_loss < best_val_loss:
+        if val_r5 > best_r5:
+            best_r5 = val_r5
+            best_r1 = val_r1
             best_val_loss = avg_val_loss
             best_epoch = epoch
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
-            best_r1 = val_r1
-            best_r5 = val_r5
-            logger.info("  *** new best (epoch %d)", epoch)
+            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f", epoch, val_r5, val_r1)
         else:
             patience_counter += 1
 
