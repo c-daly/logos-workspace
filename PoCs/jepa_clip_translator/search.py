@@ -125,13 +125,13 @@ def _prepare_batch(
     batch_clip_img: torch.Tensor,
     num_tokens: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Align JEPA and CLIP tensors for the loss.
+    """Align JEPA and CLIP tensors for token-level training.
 
-    Token-level JEPA (B, T, 1024): subsample JEPA to num_tokens, then
-    mean-pool CLIP frames to a single (B, 768) vector so all loss functions
-    (cosine, InfoNCE) get vector-to-vector comparisons.
+    Token-level JEPA (B, T, 1024): subsample to K tokens.
+    Token-level CLIP (B, F, 768): subsample frames to K to match JEPA.
+    Returns (B, K, 1024) and (B, K, 768) — no mean-pooling.
 
-    Legacy JEPA (B, 1024): mean-pool CLIP frames the same way.
+    Legacy JEPA (B, 1024): mean-pool CLIP for compatibility.
     """
     if batch_jepa.dim() == 3:
         T = batch_jepa.shape[1]
@@ -139,9 +139,16 @@ def _prepare_batch(
         if K < T:
             idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
             batch_jepa = batch_jepa[:, idx, :]
-    # Always mean-pool CLIP frames → (B, 768)
-    if batch_clip_img.dim() == 3:
-        batch_clip_img = batch_clip_img.mean(dim=1)
+        # Subsample CLIP frames to match K JEPA tokens — no pooling
+        if batch_clip_img.dim() == 3:
+            F = batch_clip_img.shape[1]
+            K_out = batch_jepa.shape[1]
+            fidx = torch.linspace(0, F - 1, K_out, dtype=torch.long, device=batch_clip_img.device)
+            batch_clip_img = batch_clip_img[:, fidx, :]
+    else:
+        # Legacy 2D JEPA: mean-pool CLIP for compatibility
+        if batch_clip_img.dim() == 3:
+            batch_clip_img = batch_clip_img.mean(dim=1)
     return batch_jepa, batch_clip_img
 
 
@@ -220,7 +227,15 @@ def run_experiment(
             batch_jepa = _augment(batch_jepa, cfg)
             optimizer.zero_grad()
             pred = model(batch_jepa)
-            result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
+            # Flatten token-level tensors → (B*K, D) for loss functions
+            if pred.dim() == 3:
+                B, K, D = pred.shape
+                pred_l = pred.reshape(B * K, D)
+                clip_img_l = batch_clip_img.reshape(B * K, batch_clip_img.shape[-1])
+                clip_txt_l = batch_clip_txt.unsqueeze(1).expand(B, K, batch_clip_txt.shape[1], batch_clip_txt.shape[2]).reshape(B * K, batch_clip_txt.shape[1], batch_clip_txt.shape[2])
+            else:
+                pred_l, clip_img_l, clip_txt_l = pred, batch_clip_img, batch_clip_txt
+            result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
             result["loss"].backward()
             if cfg.training.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip)
@@ -237,14 +252,25 @@ def run_experiment(
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
                 pred = model(batch_jepa)
-                result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
+                # Flatten for loss, pool for retrieval
+                if pred.dim() == 3:
+                    B, K, D = pred.shape
+                    pred_l = pred.reshape(B * K, D)
+                    clip_img_l = batch_clip_img.reshape(B * K, batch_clip_img.shape[-1])
+                    clip_txt_l = batch_clip_txt.unsqueeze(1).expand(B, K, batch_clip_txt.shape[1], batch_clip_txt.shape[2]).reshape(B * K, batch_clip_txt.shape[1], batch_clip_txt.shape[2])
+                    pred_pooled = pred.mean(dim=1)
+                    clip_img_pooled = batch_clip_img.mean(dim=1)
+                else:
+                    pred_l, clip_img_l, clip_txt_l = pred, batch_clip_img, batch_clip_txt
+                    pred_pooled, clip_img_pooled = pred, batch_clip_img
+                result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
                 val_loss_sum += result["loss"].item()
                 val_cos_sum += (
-                    F.normalize(pred, dim=-1) * F.normalize(batch_clip_img, dim=-1)
+                    F.normalize(pred_pooled, dim=-1) * F.normalize(clip_img_pooled, dim=-1)
                 ).sum(-1).mean().item()
                 val_batches += 1
-                _val_preds.append(pred.cpu())
-                _val_clips.append(batch_clip_img.cpu())
+                _val_preds.append(pred_pooled.cpu())
+                _val_clips.append(clip_img_pooled.cpu())
                 _val_txts.append(batch_clip_txt.cpu().mean(dim=1))
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
