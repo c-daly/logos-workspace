@@ -66,7 +66,7 @@ class LLMConfig:
         return f"{self.provider}/{self.model}"
 
 
-def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig) -> list[ExperimentConfig]:
+def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_log_path: str | None = None) -> list[ExperimentConfig]:
     """Call the configured LLM to generate next experiment configs. Returns [] on failure."""
     compact = []
     for r in results:
@@ -116,7 +116,7 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig) -> l
     if text is None:
         return []
 
-    return _parse_configs(text)
+    return _parse_configs(text, llm_log_path=llm_log_path)
 
 
 def _call_openai(model: str, prompt: str) -> str | None:
@@ -174,8 +174,19 @@ def _call_anthropic(model: str, prompt: str) -> str | None:
         return None
 
 
-def _parse_configs(text: str) -> list[ExperimentConfig]:
+def _parse_configs(text: str, llm_log_path: str | None = None) -> list[ExperimentConfig]:
     """Extract and parse the JSON config array from the LLM response."""
+    # Write full response to dedicated LLM log file
+    if llm_log_path:
+        try:
+            from datetime import datetime as _dt
+            with open(llm_log_path, "a") as _lf:
+                _lf.write(f"\n{'=' * 70}\n{_dt.now().strftime('%H:%M:%S')} LLM RESPONSE\n{'=' * 70}\n")
+                _lf.write(text)
+                _lf.write(f"\n{'=' * 70}\n")
+        except Exception:
+            pass
+
     # Log analysis section (everything before the first code block)
     if "```" in text:
         analysis = text.split("```")[0].strip()
@@ -347,11 +358,12 @@ def generate_next_configs(
     all_results: list[dict],
     num_configs: int = 2,
     llm_config: LLMConfig | None = None,
+    llm_log_path: str | None = None,
 ) -> list[ExperimentConfig]:
     """Try LLM first, fall back to random mutation."""
     if llm_config is None:
         llm_config = LLMConfig()
-    configs = _call_llm(all_results, num_configs, llm_config)
+    configs = _call_llm(all_results, num_configs, llm_config, llm_log_path=llm_log_path)
     if configs:
         print(f"  LLM ({llm_config}) proposed {len(configs)} configs.")
         return configs

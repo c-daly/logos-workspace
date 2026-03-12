@@ -391,6 +391,8 @@ def run_search(
     warm_start = resume and bool(all_results)
     if warm_start:
         logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
+    llm_log_path = output_path.replace(".json", "_llm.log")
+    logger.info("LLM responses: %s", llm_log_path)
     best_metric = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
     rounds_without_improvement = 0
 
@@ -399,7 +401,7 @@ def run_search(
 
         configs = (
             generate_round1_configs() if round_num == 1 and not warm_start
-            else generate_next_configs(all_results, num_configs=configs_per_round, llm_config=llm_config)
+            else generate_next_configs(all_results, num_configs=configs_per_round, llm_config=llm_config, llm_log_path=llm_log_path)
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
