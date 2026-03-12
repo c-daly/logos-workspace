@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import re
 import uuid
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 from config import (
     ArchitectureConfig,
@@ -77,7 +80,12 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig) -> l
             }
         compact.append(c)
 
-    sorted_results = sorted(compact, key=lambda r: -r.get("txt_R@1", r.get("R@1", 0)))
+    # Sort by txt_R@1 if available, else R@5, else R@1
+    def _sort_key(r):
+        if r.get("txt_R@1", 0.0) > 0:
+            return -r["txt_R@1"]
+        return -r.get("R@5", r.get("R@1", 0))
+    sorted_results = sorted(compact, key=_sort_key)
     best_txt_r1 = sorted_results[0].get("txt_R@1", 0.0) if sorted_results else 0.0
     best_txt_r5 = sorted_results[0].get("txt_R@5", 0.0) if sorted_results else 0.0
     best_img_r5 = max((r.get("R@5", 0.0) for r in sorted_results), default=0.0)
@@ -85,16 +93,17 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig) -> l
     plateau = len(sorted_results) >= 5 and (best_txt_r1 - sorted_results[4].get("txt_R@1", best_txt_r1)) < 0.01
 
     prompt = (
-        f"Results so far ({len(compact)} experiments). Ranked by txt_R@1 (primary target).\n"
-        f"Best: txt_R@1={best_txt_r1:.3f}  txt_R@5={best_txt_r5:.3f}  imgR@5={best_img_r5:.3f}\n"
-        f"Goal: push txt_R@1 higher. Text retrieval is far below image retrieval — focus on text-target losses and InfoNCE.\n"
+        f"Results so far ({len(compact)} experiments). Primary target: txt_R@1.\n"
+        f"Best known: txt_R@1={best_txt_r1:.3f}  txt_R@5={best_txt_r5:.3f}  imgR@5={best_img_r5:.3f}\n"
+        + ("NOTE: older results lack txt_R@1 — they are ranked by imgR@5 as proxy.\n" if best_txt_r1 == 0.0 else "")
+        + f"Goal: push txt_R@1 higher. Text retrieval is far below image retrieval — focus on text-target losses and InfoNCE.\n"
         + ("Status: PLATEAUING on txt_R@1 — try a genuinely different approach.\n" if plateau else "")
         + f"\nTop 5 results:\n{json.dumps(top5, indent=2)}"
         + f"\n\nAll results:\n{json.dumps(sorted_results, indent=2)}"
         + f"\n\nPropose {num_configs} new ExperimentConfig dicts targeting improved txt_R@1."
     )
 
-    print(f"  Calling {llm_config} ...")
+    logger.info("  Calling %s ...", llm_config)
 
     if llm_config.provider == "openai":
         text = _call_openai(llm_config.model, prompt)
@@ -167,15 +176,14 @@ def _call_anthropic(model: str, prompt: str) -> str | None:
 
 def _parse_configs(text: str) -> list[ExperimentConfig]:
     """Extract and parse the JSON config array from the LLM response."""
-    # Print analysis section (everything before the first code block)
+    # Log analysis section (everything before the first code block)
     if "```" in text:
         analysis = text.split("```")[0].strip()
-        if analysis:
-            print(f"\n{'─' * 70}")
-            print("LLM ANALYSIS:")
-            print(f"{'─' * 70}")
-            print(analysis)
-            print(f"{'─' * 70}\n")
+    else:
+        m = re.search(r"\[", text)
+        analysis = text[:m.start()].strip() if m else text.strip()
+    if analysis:
+        logger.info("\n%s\nLLM ANALYSIS:\n%s\n%s", "-" * 70, analysis, "-" * 70)
 
     # Extract JSON block
     json_str = None
