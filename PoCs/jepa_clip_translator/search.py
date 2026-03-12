@@ -407,6 +407,21 @@ def run_search(
                 "  New best: R@5=%.3f  R@1=%.3f -- %s",
                 best_r5, overall_best.get("R@1", 0.0), overall_best["experiment_id"],
             )
+            _ckpt = os.path.join(
+                os.path.dirname(os.path.abspath(output_path)),
+                f"best_r{round_num:02d}_{overall_best['experiment_id']}_R5{best_r5:.3f}.pt",
+            )
+            torch.save({
+                "model_state_dict": overall_best["best_state"],
+                "config": overall_best["config"],
+                "round": round_num,
+                "experiment_id": overall_best["experiment_id"],
+                "R@5": best_r5,
+                "R@1": overall_best.get("R@1", 0.0),
+                "val_cosine_sim": overall_best["val_cosine_sim"],
+                "val_loss": overall_best["val_loss"],
+            }, _ckpt)
+            logger.info("  Checkpoint saved: %s", _ckpt)
         else:
             rounds_without_improvement += 1
             patience_str = f"{rounds_without_improvement}/{convergence_patience}" if convergence_patience else str(rounds_without_improvement)
