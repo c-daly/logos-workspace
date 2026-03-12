@@ -100,6 +100,10 @@ def load_embeddings(
         jepa = torch.tensor(np.array(f["jepa_embeddings"]), dtype=torch.float32)
         clip_image = torch.tensor(np.array(f["clip_image_embeddings"]), dtype=torch.float32)
         clip_text = torch.tensor(np.array(f["clip_text_embeddings"]), dtype=torch.float32)
+        # clip_image: (N,64,768) -> use CLS token (pos 0), no mean pooling
+        if clip_image.dim() == 3:
+            clip_image = clip_image[:, 0, :]
+        # clip_text: (N,5,768) kept as-is; training loop samples one caption per batch
 
     n = jepa.shape[0]
     rng = np.random.RandomState(seed)
@@ -193,11 +197,7 @@ def _prepare_batch(
         if K < T:
             idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
             batch_jepa = batch_jepa[:, idx, :]
-        # Always align CLIP frames to K (CLIP may have a different frame count than T)
-        F = batch_clip_img.shape[1]
-        if F != K:
-            clip_idx = torch.linspace(0, F - 1, K, dtype=torch.long, device=batch_clip_img.device)
-            batch_clip_img = batch_clip_img[:, clip_idx, :]
+        # clip_img is already (B,768) CLS token — no subsample needed
     else:
         # Legacy: average CLIP frames to match the single JEPA vector.
         F = batch_clip_img.shape[1] if batch_clip_img.dim() == 3 else None
@@ -280,6 +280,9 @@ def run_experiment(
         train_loss_sum = 0.0
         for batch_jepa, batch_clip_img, batch_clip_txt in train_loader:
             batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
+            # Sample one caption per batch (no mean pooling — same approach as v5 training)
+            cap_idx = torch.randint(batch_clip_txt.shape[1], (1,)).item()
+            batch_clip_txt = batch_clip_txt[:, cap_idx, :]
             batch_jepa = _augment(batch_jepa, cfg)
             optimizer.zero_grad()
             pred = model(batch_jepa)
@@ -296,6 +299,7 @@ def run_experiment(
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
+                batch_clip_txt = batch_clip_txt[:, 0, :]
                 pred = model(batch_jepa)
                 result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
                 val_loss_sum += result["loss"].item()

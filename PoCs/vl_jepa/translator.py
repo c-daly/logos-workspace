@@ -30,6 +30,8 @@ class LinearTranslator(nn.Module):
         self.linear = nn.Linear(input_dim, output_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         return F.normalize(self.linear(x), dim=-1)
 
 
@@ -52,6 +54,8 @@ class MLPTranslator(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         return F.normalize(self.net(x), dim=-1)
 
 
@@ -84,6 +88,8 @@ class ResidualTranslator(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         x = self.input_proj(x)
         for block in self.blocks:
             x = block(x)
