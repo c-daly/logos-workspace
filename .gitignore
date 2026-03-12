@@ -47,3 +47,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+PoCs/vl_jepa/checkpoints/
+*.pt
