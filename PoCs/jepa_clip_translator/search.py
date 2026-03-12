@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import logging
 import math
@@ -356,6 +357,17 @@ def evaluate_best(result: dict, test_data: dict, device: torch.device) -> dict:
 # Search loop
 # ---------------------------------------------------------------------------
 
+def _load_existing_log(output_path: str) -> list[dict]:
+    if not os.path.exists(output_path):
+        return []
+    try:
+        with open(output_path) as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 def run_search(
     embeddings_path: str,
     max_rounds: int = 5,
@@ -364,18 +376,26 @@ def run_search(
     device: torch.device = torch.device("cpu"),
     output_path: str = "experiment_log.json",
     llm_config: LLMConfig | None = None,
+    resume: bool = False,
+    max_experiments: int | None = None,
+    target_metric: str = "R@5",
+    target_value: float | None = None,
 ) -> dict:
     train_data, val_data, test_data = load_embeddings(embeddings_path, device)
 
-    all_results: list[dict] = []
-    best_r5 = 0.0
+    all_results: list[dict] = _load_existing_log(output_path) if resume else []
+    warm_start = resume and bool(all_results)
+    if warm_start:
+        logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
+    best_r5 = max((r.get("R@5", 0.0) for r in all_results), default=0.0)
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
         logger.info("\n%s\n# ROUND %d/%d\n%s", "#" * 70, round_num, max_rounds, "#" * 70)
 
-        configs = generate_round1_configs() if round_num == 1 else generate_next_configs(
-            all_results, num_configs=configs_per_round, llm_config=llm_config
+        configs = (
+            generate_round1_configs() if round_num == 1 and not warm_start
+            else generate_next_configs(all_results, num_configs=configs_per_round, llm_config=llm_config)
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
@@ -384,6 +404,11 @@ def run_search(
         for cfg in configs:
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
+            with open(output_path, "w") as _f:
+                json.dump([{k: v for k, v in r.items() if k != "best_state"} for r in all_results], _f, indent=2)
+            if max_experiments is not None and len(all_results) >= max_experiments:
+                logger.info("  Reached max_experiments (%d). Stopping.", max_experiments)
+                break
             if result.get("R@5", 0.0) > round_best_r5:
                 round_best_r5 = result.get("R@5", 0.0)
                 round_best_r1 = result.get("R@1", 0.0)
@@ -430,6 +455,12 @@ def run_search(
         if convergence_patience is not None and rounds_without_improvement >= convergence_patience:
             logger.info("  Converged after %d rounds.", round_num)
             break
+
+        if target_value is not None:
+            _cur = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
+            if _cur >= target_value:
+                logger.info("  Target %s=%.3f reached (%.3f). Stopping.", target_metric, target_value, _cur)
+                break
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
@@ -500,6 +531,12 @@ def main() -> None:
     parser.add_argument("--output", default="experiment_log.json")
     parser.add_argument("--llm-provider", default=None, help="LLM provider: openai (default) or anthropic")
     parser.add_argument("--llm-model", default=None, help="Model name (default: gpt-4o for openai, claude-opus-4-6 for anthropic)")
+    parser.add_argument("--max-experiments", type=int, default=None, help="Stop after this many total experiments")
+    parser.add_argument("--target-metric", default="R@5", choices=["val_cosine_sim", "R@1", "R@5"],
+                        help="Metric to target (default: R@5)")
+    parser.add_argument("--target-value", type=float, default=None,
+                        help="Stop early if target-metric reaches this value")
+    parser.add_argument("--resume", action="store_true", help="Resume from existing output log")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -507,6 +544,13 @@ def main() -> None:
         format="%(asctime)s %(message)s",
         datefmt="%H:%M:%S",
     )
+    _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_logs")
+    os.makedirs(_log_dir, exist_ok=True)
+    _run_log = os.path.join(_log_dir, "run_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".log")
+    _fh = logging.FileHandler(_run_log)
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(_fh)
+    logger.info("Run log: %s", _run_log)
 
     device = torch.device(args.device)
     logger.info("Device: %s", device)
@@ -525,6 +569,10 @@ def main() -> None:
         device=device,
         output_path=args.output,
         llm_config=llm_config,
+        resume=args.resume,
+        max_experiments=args.max_experiments,
+        target_metric=args.target_metric,
+        target_value=args.target_value,
     )
 
 
