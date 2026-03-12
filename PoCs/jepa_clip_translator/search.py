@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime
 import json
 import logging
@@ -405,6 +406,10 @@ def run_search(
         round_best_r5 = 0.0
         round_best_r1 = 0.0
         for cfg in configs:
+            # Ensure sequential number prefix, keep descriptive name
+            _exp_num = len(all_results) + 1
+            _desc = re.sub(r"^exp_\d{3}_?", "", cfg.experiment_id)
+            cfg.experiment_id = f"exp_{_exp_num:03d}_{_desc}" if _desc else f"exp_{_exp_num:03d}"
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
             with open(output_path, "w") as _f:
