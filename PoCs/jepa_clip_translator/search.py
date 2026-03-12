@@ -391,7 +391,7 @@ def run_search(
     warm_start = resume and bool(all_results)
     if warm_start:
         logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
-    best_r5 = max((r.get("R@5", 0.0) for r in all_results), default=0.0)
+    best_metric = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
@@ -403,8 +403,7 @@ def run_search(
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
-        round_best_r5 = 0.0
-        round_best_r1 = 0.0
+        round_best_metric = 0.0
         for cfg in configs:
             # Ensure sequential number prefix, keep descriptive name
             _exp_num = len(all_results) + 1
@@ -417,40 +416,44 @@ def run_search(
             if max_experiments is not None and len(all_results) >= max_experiments:
                 logger.info("  Reached max_experiments (%d). Stopping.", max_experiments)
                 break
-            if result.get("R@5", 0.0) > round_best_r5:
-                round_best_r5 = result.get("R@5", 0.0)
-                round_best_r1 = result.get("R@1", 0.0)
+            if result.get(target_metric, 0.0) > round_best_metric:
+                round_best_metric = result.get(target_metric, 0.0)
 
-        # Round summary
+        # Round summary — sort and mark by target_metric
         logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
-        for r in sorted(all_results[-len(configs):], key=lambda r: -r.get("R@5", 0.0)):
+        for r in sorted(all_results[-len(configs):], key=lambda r: -r.get(target_metric, 0.0)):
             arch = _arch_desc_from_dict(r["config"]["architecture"])
-            marker = " <-- best" if r.get("R@5", 0.0) == round_best_r5 else ""
+            marker = " <-- best" if r.get(target_metric, 0.0) == round_best_metric else ""
             logger.info(
-                "  %-25s %-40s R@5=%.3f  R@1=%.3f  cos=%.4f  ep=%d%s",
-                r["experiment_id"], arch, r.get("R@5", 0.0), r.get("R@1", 0.0),
-                r["val_cosine_sim"], r["epochs_trained"], marker,
+                "  %-30s %-20s imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  ep=%d%s",
+                r["experiment_id"], arch,
+                r.get("R@5", 0.0), r.get("txt_R@1", 0.0), r.get("txt_R@5", 0.0),
+                r["epochs_trained"], marker,
             )
 
-        if round_best_r5 > best_r5:
-            best_r5 = round_best_r5
+        if round_best_metric > best_metric:
+            best_metric = round_best_metric
             rounds_without_improvement = 0
-            overall_best = max(all_results, key=lambda r: r.get("R@5", 0.0))
+            overall_best = max(all_results, key=lambda r: r.get(target_metric, 0.0))
             logger.info(
-                "  New best: R@5=%.3f  R@1=%.3f -- %s",
-                best_r5, overall_best.get("R@1", 0.0), overall_best["experiment_id"],
+                "  New best: %s=%.3f  imgR@5=%.3f  txtR@1=%.3f -- %s",
+                target_metric, best_metric,
+                overall_best.get("R@5", 0.0), overall_best.get("txt_R@1", 0.0),
+                overall_best["experiment_id"],
             )
             _ckpt = os.path.join(
                 os.path.dirname(os.path.abspath(output_path)),
-                f"best_r{round_num:02d}_{overall_best['experiment_id']}_R5{best_r5:.3f}.pt",
+                f"best_r{round_num:02d}_{overall_best['experiment_id']}_{target_metric.replace('@','at')}{best_metric:.3f}.pt",
             )
             torch.save({
                 "model_state_dict": overall_best["best_state"],
                 "config": overall_best["config"],
                 "round": round_num,
                 "experiment_id": overall_best["experiment_id"],
-                "R@5": best_r5,
-                "R@1": overall_best.get("R@1", 0.0),
+                target_metric: best_metric,
+                "R@5": overall_best.get("R@5", 0.0),
+                "txt_R@1": overall_best.get("txt_R@1", 0.0),
+                "txt_R@5": overall_best.get("txt_R@5", 0.0),
                 "val_cosine_sim": overall_best["val_cosine_sim"],
                 "val_loss": overall_best["val_loss"],
             }, _ckpt)
@@ -472,14 +475,15 @@ def run_search(
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
-    best_result = max(all_results, key=lambda r: r.get("R@5", 0.0))
-    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get("R@5", 0.0)), 1):
+    best_result = max(all_results, key=lambda r: r.get(target_metric, 0.0))
+    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get(target_metric, 0.0)), 1):
         arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
         logger.info(
-            "%2d. %-25s %-40s R@5=%.3f  R@1=%.3f  cos=%.4f  ep=%d%s",
-            rank, r["experiment_id"], arch, r.get("R@5", 0.0), r.get("R@1", 0.0),
-            r["val_cosine_sim"], r["epochs_trained"], marker,
+            "%2d. %-30s %-20s imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  ep=%d%s",
+            rank, r["experiment_id"], arch,
+            r.get("R@5", 0.0), r.get("txt_R@1", 0.0), r.get("txt_R@5", 0.0),
+            r["epochs_trained"], marker,
         )
 
     # Evaluate best on test set
