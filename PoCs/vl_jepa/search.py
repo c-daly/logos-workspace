@@ -480,28 +480,35 @@ def run_search(
             r["epochs_trained"], marker,
         )
 
-    # Evaluate best on test set
-    logger.info("\nEvaluating best model on test set: %s", best_result["experiment_id"])
-    eval_results = evaluate_best(best_result, test_data, device)
-    img = eval_results["image_retrieval"]
-    txt = eval_results["text_retrieval"]
-    logger.info(
-        "Image retrieval: R@1=%.3f  R@5=%.3f  R@10=%.3f  median_rank=%.0f",
-        img["R@1"], img["R@5"], img["R@10"], img["median_rank"],
-    )
-    logger.info(
-        "Text retrieval:  R@1=%.3f  R@5=%.3f  R@10=%.3f  median_rank=%.0f",
-        txt["R@1"], txt["R@5"], txt["R@10"], txt["median_rank"],
-    )
-    logger.info(
-        "Cosine sim: mean=%.4f +/- %.4f",
-        eval_results["cosine_sim_mean"], eval_results["cosine_sim_std"],
-    )
+    # Evaluate best on test set (only if best_state available -- skipped on pure-resume runs)
+    eval_results: dict = {}
+    if best_result.get("best_state") is not None:
+        logger.info("\nEvaluating best model on test set: %s", best_result["experiment_id"])
+        eval_results = evaluate_best(best_result, test_data, device)
+        img = eval_results["image_retrieval"]
+        txt = eval_results["text_retrieval"]
+        logger.info(
+            "Image retrieval: R@1=%.3f  R@5=%.3f  R@10=%.3f  median_rank=%.0f",
+            img["R@1"], img["R@5"], img["R@10"], img["median_rank"],
+        )
+        logger.info(
+            "Text retrieval:  R@1=%.3f  R@5=%.3f  R@10=%.3f  median_rank=%.0f",
+            txt["R@1"], txt["R@5"], txt["R@10"], txt["median_rank"],
+        )
+        logger.info(
+            "Cosine sim: mean=%.4f +/- %.4f",
+            eval_results["cosine_sim_mean"], eval_results["cosine_sim_std"],
+        )
+    else:
+        logger.warning(
+            "best_state not available for %s (loaded from JSON log) -- skipping evaluate_best",
+            best_result["experiment_id"],
+        )
 
     # Save checkpoint
     checkpoint_path = f"best_translator_{best_result['experiment_id']}.pt"
     torch.save({
-        "model_state_dict": best_result["best_state"],
+        "model_state_dict": best_result.get("best_state"),
         "config": best_result["config"],
         "val_loss": best_result["val_loss"],
         "val_cosine_sim": best_result["val_cosine_sim"],
