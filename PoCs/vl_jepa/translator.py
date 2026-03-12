@@ -191,6 +191,8 @@ class PipelineTranslator(nn.Module):
         self.pipeline = nn.ModuleList(modules)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         for stage in self.pipeline:
             x = stage(x)
         return F.normalize(x, dim=-1)
