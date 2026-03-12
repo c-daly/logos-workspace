@@ -17,42 +17,27 @@ from config import (
     TrainingConfig,
 )
 
-SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embedding translator (1024-dim → 768-dim shared embedding space).
+SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embedding translator (V-JEPA 1024-dim token embeddings -> 768-dim CLIP space).
 
-The task: learn a translator that maps V-JEPA temporal video embeddings into a shared space alongside CLIP image and text embeddings. This is NOT about making JEPA look like CLIP — it's about finding a shared geometry that works for all modalities.
+PRIMARY OBJECTIVE: maximize TEXT retrieval (txt_R@1, txt_R@5). Image retrieval is already solved (imgR@5 ~0.93). The critical gap is text: current best txt_R@1=0.11, txt_R@5=0.31.
 
-You will receive results sorted by val_cosine_sim. Your job is to propose configs that improve on the best result. When the search is plateauing (top results clustered near the same score), be bold — propose genuinely different ideas, not just parameter tweaks.
+KEY FINDINGS so far:
+- InfoNCE (contrastive) loss is ESSENTIAL for retrieval — it is the single biggest lever. Use it heavily.
+- Pure MSE/cosine losses produce high cosine similarity but near-zero retrieval. Do NOT rely on them alone.
+- Multi-target losses that include clip_text_mean alongside clip_image significantly help text retrieval.
+- Transformer architectures with InfoNCE achieve the best results.
 
-IMPORTANT — known failure mode:
-- Contrastive loss causes training collapse in this setup. Do NOT use contrastive. Stick to mse and cosine only.
+TO IMPROVE TEXT RETRIEVAL specifically:
+- Add InfoNCE loss terms targeting `clip_text_mean` or `clip_text_first` (not just clip_image).
+- Use bidirectional alignment: loss against both image AND text CLIP embeddings.
+- Try heavier weights on text-target loss terms (e.g. 0.5+ on cosine->clip_text_mean).
+- Warmup with MSE then switch to InfoNCE works well.
+- Lower InfoNCE temperature (0.03-0.07) tends to sharpen retrieval.
 
-Things worth trying when stuck:
-- Deeper or wider MLPs, or residual nets with bottleneck layers
-- Aggressive LR warmup + cosine decay with long cooldown
-- Multi-target losses: cosine toward both clip_image and clip_text simultaneously
-- Warmup on MSE (geometry anchor), then switch to cosine (angular alignment)
-- Very small LR + long training (200-500 epochs) for linear/shallow models
-- Different MSE:cosine weight ratios — pure MSE, pure cosine, or mixed
-- Layer norm, dropout, or both — or neither
-- Different activations (silu often outperforms gelu on projection tasks)
-- Per-target cosine: try clip_text_mean or clip_text_first as primary target instead of clip_image
-
-Schema (all fields optional — only include what you're changing from defaults):
-- architecture: type (linear|mlp|residual), hidden_dim (64-2048), num_blocks (1-12), num_layers (1-6), dropout (0.0-0.5), activation (gelu|relu|silu), use_layer_norm (bool)
-- loss.terms: [{function (mse|cosine|contrastive), target (clip_image|clip_text_mean|clip_text_first), weight, temperature (0.01-1.0), label_smoothing (0.0-0.2)}]
-- loss.warmup_terms: loss mix for first warmup_epochs epochs; loss.warmup_epochs: int
-- training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256|512|1024), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
-- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3), num_tokens (int or null) — for token-level JEPA: number of temporal tokens to use (null = all); for legacy mean-pooled JEPA: number of CLIP frames to average (null = all)
-
-Respond with:
-
-## Analysis
-What's working? What's plateauing? What haven't we tried?
-
-## Configs
-```json
-[...array of ExperimentConfig dicts...]
-```"""
+Schema: architecture: {type, hidden_dim, num_blocks, num_layers, num_heads, dropout, activation, use_layer_norm}
+loss.terms: [{function: mse|cosine|infonce, target: clip_image|clip_text_mean|clip_text_first, weight, temperature, label_smoothing}]
+training: {optimizer, lr, lr_min, lr_schedule, warmup_epochs, cooldown_epochs, weight_decay, batch_size, max_epochs, early_stop_patience, grad_clip}
+data: {noise_std, embedding_dropout, num_tokens}"""
 
 
 # ---------------------------------------------------------------------------
@@ -92,17 +77,21 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig) -> l
             }
         compact.append(c)
 
-    sorted_results = sorted(compact, key=lambda r: -r.get("val_cosine_sim", 0))
-    best_cos = sorted_results[0].get("val_cosine_sim", 0) if sorted_results else 0
+    sorted_results = sorted(compact, key=lambda r: -r.get("txt_R@1", r.get("R@1", 0)))
+    best_txt_r1 = sorted_results[0].get("txt_R@1", 0.0) if sorted_results else 0.0
+    best_txt_r5 = sorted_results[0].get("txt_R@5", 0.0) if sorted_results else 0.0
+    best_img_r5 = max((r.get("R@5", 0.0) for r in sorted_results), default=0.0)
     top5 = sorted_results[:5]
-    plateau = len(sorted_results) >= 5 and (best_cos - sorted_results[4].get("val_cosine_sim", 0)) < 0.005
+    plateau = len(sorted_results) >= 5 and (best_txt_r1 - sorted_results[4].get("txt_R@1", best_txt_r1)) < 0.01
 
     prompt = (
-        f"Current best val_cosine_sim: {best_cos:.4f} ({len(compact)} experiments run so far)\n"
-        + ("Status: PLATEAUING — top 5 results are within 0.005 of each other. Try something genuinely different.\n" if plateau else "")
+        f"Results so far ({len(compact)} experiments). Ranked by txt_R@1 (primary target).\n"
+        f"Best: txt_R@1={best_txt_r1:.3f}  txt_R@5={best_txt_r5:.3f}  imgR@5={best_img_r5:.3f}\n"
+        f"Goal: push txt_R@1 higher. Text retrieval is far below image retrieval — focus on text-target losses and InfoNCE.\n"
+        + ("Status: PLATEAUING on txt_R@1 — try a genuinely different approach.\n" if plateau else "")
         + f"\nTop 5 results:\n{json.dumps(top5, indent=2)}"
         + f"\n\nAll results:\n{json.dumps(sorted_results, indent=2)}"
-        + f"\n\nPropose {num_configs} new ExperimentConfig dicts."
+        + f"\n\nPropose {num_configs} new ExperimentConfig dicts targeting improved txt_R@1."
     )
 
     print(f"  Calling {llm_config} ...")
@@ -222,22 +211,25 @@ def _parse_configs(text: str) -> list[ExperimentConfig]:
 # ---------------------------------------------------------------------------
 
 def generate_round1_configs() -> list[ExperimentConfig]:
-    """Five initial configs covering architectures, loss strategies, and batch sizes."""
+    """Five initial configs: transformer first (boosted), then pointwise baselines and a pipeline."""
     return [
+        # Transformer first — higher LR, longer warmup, more patience than round 0 attempt.
         ExperimentConfig(
-            experiment_id="exp_001_linear_mse",
+            experiment_id="exp_001_transformer",
+            architecture=ArchitectureConfig(type="transformer", hidden_dim=512, num_blocks=4, num_heads=8, dropout=0.05),
+            training=TrainingConfig(batch_size=512, max_epochs=300, early_stop_patience=20,
+                                    lr=5e-4, warmup_epochs=20, cooldown_epochs=40, lr_schedule="cosine"),
+            loss=LossConfig(terms=[
+                {"function": "cosine", "target": "clip_image", "weight": 0.7, "temperature": 0.07, "label_smoothing": 0.0},
+                {"function": "cosine", "target": "clip_text_mean", "weight": 0.3, "temperature": 0.07, "label_smoothing": 0.0},
+            ]),
+        ),
+        ExperimentConfig(
+            experiment_id="exp_002_linear_mse",
             architecture=ArchitectureConfig(type="linear"),
             training=TrainingConfig(batch_size=128, max_epochs=200, early_stop_patience=10),
             loss=LossConfig(terms=[{"function": "mse", "target": "clip_image", "weight": 1.0,
                                     "temperature": 0.07, "label_smoothing": 0.0}]),
-        ),
-        ExperimentConfig(
-            experiment_id="exp_002_mlp_cosine",
-            architecture=ArchitectureConfig(type="mlp", hidden_dim=512, num_layers=2),
-            training=TrainingConfig(batch_size=256, max_epochs=200, early_stop_patience=10),
-            loss=LossConfig(terms=[
-                {"function": "cosine", "target": "clip_image", "weight": 1.0, "temperature": 0.07, "label_smoothing": 0.0},
-            ]),
         ),
         ExperimentConfig(
             experiment_id="exp_003_mlp_multitarget",
@@ -249,17 +241,7 @@ def generate_round1_configs() -> list[ExperimentConfig]:
             ]),
         ),
         ExperimentConfig(
-            experiment_id="exp_004_residual_mse_warmup",
-            architecture=ArchitectureConfig(type="residual", hidden_dim=512, num_blocks=4),
-            training=TrainingConfig(batch_size=256, max_epochs=200, early_stop_patience=10, warmup_epochs=20),
-            loss=LossConfig(
-                terms=[{"function": "cosine", "target": "clip_image", "weight": 1.0, "temperature": 0.07, "label_smoothing": 0.0}],
-                warmup_terms=[{"function": "mse", "target": "clip_image", "weight": 1.0, "temperature": 0.07, "label_smoothing": 0.0}],
-                warmup_epochs=20,
-            ),
-        ),
-        ExperimentConfig(
-            experiment_id="exp_005_residual_silu",
+            experiment_id="exp_004_residual_silu",
             architecture=ArchitectureConfig(type="residual", hidden_dim=768, num_blocks=6, dropout=0.1, activation="silu"),
             training=TrainingConfig(batch_size=256, max_epochs=300, early_stop_patience=15,
                                     lr=3e-4, warmup_epochs=15, cooldown_epochs=30, lr_schedule="cosine"),
@@ -268,6 +250,20 @@ def generate_round1_configs() -> list[ExperimentConfig]:
                 {"function": "cosine", "target": "clip_text_mean", "weight": 0.3, "temperature": 0.07, "label_smoothing": 0.0},
             ]),
             data=DataConfig(noise_std=0.01, embedding_dropout=0.05),
+        ),
+        # Pipeline: residual for feature extraction, MLP to compress to output dim.
+        ExperimentConfig(
+            experiment_id="exp_005_residual_mlp_pipeline",
+            architecture=ArchitectureConfig(stages=[
+                {"type": "residual", "hidden_dim": 1024, "num_blocks": 6, "dropout": 0.1, "activation": "silu", "use_layer_norm": True},
+                {"type": "mlp", "hidden_dim": 512, "num_layers": 2, "dropout": 0.05, "activation": "gelu", "use_layer_norm": True},
+            ]),
+            training=TrainingConfig(batch_size=256, max_epochs=300, early_stop_patience=15,
+                                    lr=3e-4, warmup_epochs=15, cooldown_epochs=30, lr_schedule="cosine"),
+            loss=LossConfig(terms=[
+                {"function": "cosine", "target": "clip_image", "weight": 0.7, "temperature": 0.07, "label_smoothing": 0.0},
+                {"function": "cosine", "target": "clip_text_mean", "weight": 0.3, "temperature": 0.07, "label_smoothing": 0.0},
+            ]),
         ),
     ]
 

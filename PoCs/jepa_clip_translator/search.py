@@ -231,6 +231,7 @@ def run_experiment(
         val_batches = 0
         _val_preds: list = []
         _val_clips: list = []
+        _val_txts: list = []
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
@@ -243,6 +244,7 @@ def run_experiment(
                 val_batches += 1
                 _val_preds.append(pred.cpu())
                 _val_clips.append(batch_clip_img.cpu())
+                _val_txts.append(batch_clip_txt.cpu().mean(dim=1))
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
         avg_val_cos = val_cos_sum / max(val_batches, 1)
@@ -252,6 +254,10 @@ def run_experiment(
         _lbl = torch.arange(len(_p))
         val_r1 = (_sim.argmax(1) == _lbl).float().mean().item()
         val_r5 = (_sim.topk(min(5, len(_p)), 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
+        _t = F.normalize(torch.cat(_val_txts), dim=-1)
+        _sim_txt = _p @ _t.T
+        txt_r1 = (_sim_txt.argmax(1) == _lbl).float().mean().item()
+        txt_r5 = (_sim_txt.topk(min(5, len(_p)), 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
 
         history.append({
             "epoch": epoch,
@@ -260,11 +266,13 @@ def run_experiment(
             "val_cosine_sim": avg_val_cos,
             "R@1": val_r1,
             "R@5": val_r5,
+            "txt_R@1": txt_r1,
+            "txt_R@5": txt_r5,
             "lr": current_lr,
         })
         logger.info(
-            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  lr=%.2e",
-            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, current_lr,
+            "  Epoch %d/%d  loss=%.4f  cos=%.4f  imgR@1=%.3f  imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  lr=%.2e",
+            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, txt_r1, txt_r5, current_lr,
         )
 
         if val_r5 > best_r5:
@@ -275,7 +283,7 @@ def run_experiment(
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
-            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f", epoch, val_r5, val_r1)
+            logger.info("  *** new best (epoch %d)  imgR@5=%.3f  imgR@1=%.3f  txtR@1=%.3f  txtR@5=%.3f", epoch, val_r5, val_r1, txt_r1, txt_r5)
         else:
             patience_counter += 1
 
@@ -290,6 +298,8 @@ def run_experiment(
         "val_cosine_sim": best_cos,
         "R@1": best_r1,
         "R@5": best_r5,
+        "txt_R@1": history[best_epoch - 1].get("txt_R@1", 0.0) if history else 0.0,
+        "txt_R@5": history[best_epoch - 1].get("txt_R@5", 0.0) if history else 0.0,
         "epochs_trained": len(history),
         "best_epoch": best_epoch,
         "config": cfg.to_dict(),
@@ -525,7 +535,7 @@ def main() -> None:
     parser.add_argument("--llm-provider", default=None, help="LLM provider: openai (default) or anthropic")
     parser.add_argument("--llm-model", default=None, help="Model name (default: gpt-4o for openai, claude-opus-4-6 for anthropic)")
     parser.add_argument("--max-experiments", type=int, default=None, help="Stop after this many total experiments")
-    parser.add_argument("--target-metric", default="R@5", choices=["val_cosine_sim", "R@1", "R@5"],
+    parser.add_argument("--target-metric", default="R@5", choices=["val_cosine_sim", "R@1", "R@5", "txt_R@1", "txt_R@5"],
                         help="Metric to target (default: R@5)")
     parser.add_argument("--target-value", type=float, default=None,
                         help="Stop early if target-metric reaches this value")
