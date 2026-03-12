@@ -226,6 +226,25 @@ def run_experiment(
     val_data: dict,
     device: torch.device,
 ) -> dict:
+    import os as _os
+    _log_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "run_logs")
+    _os.makedirs(_log_dir, exist_ok=True)
+    _fh = logging.FileHandler(_os.path.join(_log_dir, f"{cfg.experiment_id}.log"))
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(_fh)
+    try:
+     return _run_experiment_inner(cfg, train_data, val_data, device)
+    finally:
+        logging.getLogger().removeHandler(_fh)
+        _fh.close()
+
+
+def _run_experiment_inner(
+    cfg: ExperimentConfig,
+    train_data: dict,
+    val_data: dict,
+    device: torch.device,
+) -> dict:
     train_loader = DataLoader(
         TensorDataset(train_data["jepa"], train_data["clip_image"], train_data["clip_text"]),
         batch_size=cfg.training.batch_size, shuffle=True, drop_last=True,
@@ -296,6 +315,8 @@ def run_experiment(
         model.eval()
         val_loss_sum = val_cos_sum = 0.0
         val_batches = 0
+        _val_preds: list = []
+        _val_clips: list = []
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
@@ -307,9 +328,18 @@ def run_experiment(
                     F.normalize(pred, dim=-1) * F.normalize(batch_clip_img, dim=-1)
                 ).sum(-1).mean().item()
                 val_batches += 1
+                _val_preds.append(pred.cpu())
+                _val_clips.append(batch_clip_img.cpu())
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
         avg_val_cos = val_cos_sum / max(val_batches, 1)
+        # Compute R@1 / R@5 on full val set
+        _p = F.normalize(torch.cat(_val_preds), dim=-1)
+        _c = F.normalize(torch.cat(_val_clips), dim=-1)
+        _sim = _p @ _c.T
+        _lbl = torch.arange(len(_p))
+        val_r1 = (_sim.argmax(1) == _lbl).float().mean().item()
+        val_r5 = (_sim.topk(5, 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
 
         history.append({
             "epoch": epoch,
@@ -319,8 +349,8 @@ def run_experiment(
             "lr": current_lr,
         })
         logger.info(
-            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  lr=%.2e",
-            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, current_lr,
+            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  lr=%.2e",
+            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, current_lr,
         )
 
         if avg_val_loss < best_val_loss:
