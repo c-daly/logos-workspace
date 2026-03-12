@@ -123,13 +123,13 @@ def _prepare_batch(
     batch_clip_img: torch.Tensor,
     num_tokens: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Align JEPA and CLIP tensors for the loss, handling both embedding formats.
+    """Align JEPA and CLIP tensors for the loss.
 
-    Legacy (mean-pooled JEPA): jepa is (B, 1024). CLIP frames are averaged
-    down to (B, 768) so the task remains vector-to-vector.
+    Token-level JEPA (B, T, 1024): subsample JEPA to num_tokens, then
+    mean-pool CLIP frames to a single (B, 768) vector so all loss functions
+    (cosine, InfoNCE) get vector-to-vector comparisons.
 
-    Token-level JEPA: jepa is (B, T, 1024). CLIP frames are subsampled to
-    match, giving (B, K, 768). num_tokens controls K (None = use all T).
+    Legacy JEPA (B, 1024): mean-pool CLIP frames the same way.
     """
     if batch_jepa.dim() == 3:
         T = batch_jepa.shape[1]
@@ -137,17 +137,9 @@ def _prepare_batch(
         if K < T:
             idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
             batch_jepa = batch_jepa[:, idx, :]
-        # Always align CLIP frames to K (CLIP may have a different frame count than T)
-        F = batch_clip_img.shape[1]
-        if F != K:
-            clip_idx = torch.linspace(0, F - 1, K, dtype=torch.long, device=batch_clip_img.device)
-            batch_clip_img = batch_clip_img[:, clip_idx, :]
-    else:
-        # Legacy: average CLIP frames to match the single JEPA vector.
-        F = batch_clip_img.shape[1] if batch_clip_img.dim() == 3 else None
-        if F is not None:
-            K = min(num_tokens, F) if num_tokens else F
-            batch_clip_img = batch_clip_img[:, :K, :].mean(dim=1)
+    # Always mean-pool CLIP frames → (B, 768)
+    if batch_clip_img.dim() == 3:
+        batch_clip_img = batch_clip_img.mean(dim=1)
     return batch_jepa, batch_clip_img
 
 
