@@ -381,10 +381,10 @@ def generate_next_configs_random(
         terms = d.get("loss", {}).get("terms", [])
         for term in terms:
             if rng.random() < 0.3:
-                term["function"] = rng.choice(["mse", "cosine", "contrastive"])
+                term["function"] = rng.choice(["mse", "cosine", "infonce"])
             if rng.random() < 0.3:
                 term["weight"] = round(_clamp(term.get("weight", 1.0) * rng.uniform(0.5, 2.0), 0.1, 5.0), 2)
-            if term.get("function") == "contrastive" and rng.random() < 0.3:
+            if term.get("function") == "infonce" and rng.random() < 0.3:
                 term["temperature"] = round(_clamp(term.get("temperature", 0.07) * rng.uniform(0.5, 2.0), 0.01, 0.5), 4)
         d["loss"]["terms"] = terms
 

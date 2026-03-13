@@ -441,6 +441,7 @@ def run_search(
     if warm_start:
         logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
     best_val_loss = float("inf")
+    best_metric_val = 0.0  # tracks target_metric for convergence
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
@@ -457,6 +458,7 @@ def run_search(
 
         round_best = float("inf")
         round_best_cos = 0.0
+        round_best_metric = 0.0
         for cfg in configs:
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
@@ -464,6 +466,7 @@ def run_search(
             if result["val_loss"] < round_best:
                 round_best = result["val_loss"]
                 round_best_cos = result["val_cosine_sim"]
+            round_best_metric = max(round_best_metric, result.get(target_metric, 0.0))
 
         # Round summary
         logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
@@ -477,13 +480,14 @@ def run_search(
                 r["val_loss"], r["epochs_trained"], marker,
             )
 
-        if round_best < best_val_loss:
+        if round_best_metric > best_metric_val:
+            best_metric_val = round_best_metric
             best_val_loss = round_best
             rounds_without_improvement = 0
-            overall_best = min(all_results, key=lambda r: r["val_loss"])
+            overall_best = max(all_results, key=lambda r: r.get(target_metric, 0.0))
             logger.info(
-                "  New best: %.4f (cos=%.4f) -- %s",
-                best_val_loss, overall_best["val_cosine_sim"], overall_best["experiment_id"],
+                "  New best: %s=%.4f (cos=%.4f) -- %s",
+                target_metric, best_metric_val, overall_best["val_cosine_sim"], overall_best["experiment_id"],
             )
         else:
             rounds_without_improvement += 1
@@ -501,7 +505,7 @@ def run_search(
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
-    best_result = min(all_results, key=lambda r: r["val_loss"])
+    best_result = max(all_results, key=lambda r: r.get(target_metric, 0.0))
     for rank, r in enumerate(sorted(all_results, key=lambda r: -r["val_cosine_sim"]), 1):
         arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
