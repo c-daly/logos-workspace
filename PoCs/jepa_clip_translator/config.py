@@ -9,13 +9,15 @@ from typing import Literal
 
 @dataclass
 class ArchitectureConfig:
-    type: Literal["linear", "mlp", "residual"] = "linear"
+    type: Literal["linear", "mlp", "residual", "transformer"] = "linear"
     hidden_dim: int = 512
     num_blocks: int = 0
     num_layers: int = 1
+    num_heads: int = 8
     dropout: float = 0.1
     activation: Literal["gelu", "relu", "silu"] = "gelu"
     use_layer_norm: bool = True
+    stages: list | None = None  # if set, builds a pipeline; top-level type/etc. ignored
 
 
 @dataclass

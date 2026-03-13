@@ -234,7 +234,9 @@ def run_experiment(
                 clip_img_l = batch_clip_img.reshape(B * K, batch_clip_img.shape[-1])
                 clip_txt_l = batch_clip_txt.unsqueeze(1).expand(B, K, batch_clip_txt.shape[1], batch_clip_txt.shape[2]).reshape(B * K, batch_clip_txt.shape[1], batch_clip_txt.shape[2])
             else:
-                pred_l, clip_img_l, clip_txt_l = pred, batch_clip_img, batch_clip_txt
+                pred_l = pred
+                clip_img_l = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
+                clip_txt_l = batch_clip_txt
             result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
             result["loss"].backward()
             if cfg.training.grad_clip > 0:
@@ -261,8 +263,11 @@ def run_experiment(
                     pred_pooled = pred.mean(dim=1)
                     clip_img_pooled = batch_clip_img.mean(dim=1)
                 else:
-                    pred_l, clip_img_l, clip_txt_l = pred, batch_clip_img, batch_clip_txt
-                    pred_pooled, clip_img_pooled = pred, batch_clip_img
+                    pred_l = pred
+                    clip_img_l = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
+                    clip_txt_l = batch_clip_txt
+                    pred_pooled = pred
+                    clip_img_pooled = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
                 result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
                 val_loss_sum += result["loss"].item()
                 val_cos_sum += (
@@ -425,10 +430,19 @@ def run_search(
     for round_num in range(1, max_rounds + 1):
         logger.info("\n%s\n# ROUND %d/%d\n%s", "#" * 70, round_num, max_rounds, "#" * 70)
 
-        configs = (
-            generate_round1_configs() if round_num == 1 and not warm_start
-            else generate_next_configs(all_results, num_configs=configs_per_round, llm_config=llm_config, llm_log_path=llm_log_path)
-        )
+        if round_num == 1 and not warm_start:
+            configs = generate_round1_configs()
+        else:
+            configs, recommended_target = generate_next_configs(
+                all_results, num_configs=configs_per_round, llm_config=llm_config, llm_log_path=llm_log_path
+            )
+            if recommended_target and recommended_target != target_metric:
+                logger.info(
+                    "  Coordinator recommends target metric: %s (switching from %s)",
+                    recommended_target, target_metric,
+                )
+                target_metric = recommended_target
+                best_metric = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
         logger.info("  Running %d experiments this round.", len(configs))
 
         round_best_metric = 0.0
@@ -437,6 +451,10 @@ def run_search(
             _exp_num = len(all_results) + 1
             _desc = re.sub(r"^exp_\d{3}_?", "", cfg.experiment_id)
             cfg.experiment_id = f"exp_{_exp_num:03d}_{_desc}" if _desc else f"exp_{_exp_num:03d}"
+            # Hard cap: token-level training multiplies effective batch by K=32 — OOM above 256
+            if cfg.training.batch_size > 256:
+                logger.info("  Capping batch_size %d→256 (token-level OOM guard)", cfg.training.batch_size)
+                cfg.training.batch_size = 256
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
             with open(output_path, "w") as _f:

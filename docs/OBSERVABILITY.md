@@ -1,136 +1,84 @@
-# OpenTelemetry Infrastructure
+**OpenTelemetry Infrastructure Overview**
 
-## Architecture
-
+**Architecture:**
 ```
-[Sophia/Hermes/Apollo] → OTLP → [OTel Collector] → [Jaeger + Prometheus]
-                                                        ↓
-                                                   [Grafana]
+[Claude Code / LOGOS Services] → OTLP → [OTel Collector] → [Tempo (traces)]
+                                                          → [Loki (logs)]
+                                                          → [Prometheus (metrics)]
+                                                          → [Grafana Cloud (optional)]
+                                                          ↓
+                                                     [Grafana]
 ```
 
-## Components
+**Stack (running from `~/.claude/infra/otel/`):**
+- **OTel Collector** — receives OTLP traces/logs/metrics, fans out to Tempo, Loki, Prometheus
+- **Tempo 2.3.1** — trace storage + metrics_generator (service graphs, span metrics)
+- **Loki** — log storage (Claude Code events land here as structured streams)
+- **Prometheus** — metrics storage, scrapes OTel collector; also receives remote_write from Tempo
+- **Grafana** — dashboards, provisioned from `~/.claude/infra/otel/grafana/`
 
-### OTel Collector
-- Receives traces via OTLP (gRPC on 4317, HTTP on 4318)
-- Processes traces with batching and resource attribution
-- Exports to Jaeger (traces) and Prometheus (metrics)
-
-### Jaeger
-- Stores and visualizes distributed traces
-- UI available at http://localhost:16686
-- Supports trace search by service, operation, tags, duration
-
-### Prometheus
-- Stores metrics scraped from OTel collector
-- UI available at http://localhost:9090
-- Data source for Grafana dashboards
-
-## Starting the Stack
-
+**Managing the Stack:**
 ```bash
-cd logos
-./scripts/start-otel-stack.sh
+cd ~/.claude/infra/otel
+docker compose up -d        # start
+docker compose down         # stop
+docker compose restart grafana tempo prometheus   # restart specific services
+docker compose up -d --force-recreate prometheus  # recreate (needed after command-line changes)
 ```
 
-## Stopping the Stack
+**Accessing UIs:**
+- **Grafana:** http://localhost:3000
+- **Prometheus:** http://localhost:9090
+- **Tempo:** http://localhost:3200
 
+**Ports (service → collector):**
+- OTLP gRPC: `localhost:4317`
+- OTLP HTTP: `localhost:4318`
+
+**Dashboards (provisioned, auto-loaded):**
+
+| UID | Title | Datasources |
+|-----|-------|-------------|
+| `claude-code-obs` | Claude Code Observability | Prometheus + Loki |
+| `claude-code-obs-cloud` | Claude Code AI Intelligence (Cloud) | Prometheus + Loki |
+| `agent-swarm-telemetry` | Agent Swarm Telemetry | Prometheus |
+| `sophia-otel` | Sophia OTel Dashboard | Tempo |
+| `hermes-otel` | Hermes OTel Dashboard | Tempo |
+| `apollo-otel` | Apollo OTel Dashboard | Tempo |
+| `logos-key-signals` | LOGOS Key Signals | Tempo |
+
+**Prometheus Metrics Available:**
+- `claude_code_cost_usage_USD_total` — cost per model/session
+- `claude_code_token_usage_tokens_total` — tokens by type (input/output/cacheRead/cacheCreation)
+- `claude_code_session_count_total` — sessions
+- `claude_code_active_time_seconds_total` — active coding time
+- `claude_code_lines_of_code_count_total` — lines added/removed
+- `claude_code_code_edit_tool_decision_total` — edit tool accept/reject decisions
+- `agent_swarm_*` — agent swarm orchestration metrics
+- `tool_sequence_count`, `tool_transition_count` — tool usage patterns
+
+**Loki Streams:**
+- `{service_name="claude-code"}` — all Claude Code events
+- Key label: `event_name` (`api_request`, `tool_result`, `tool_use`, `api_error`, etc.)
+- Note: high cardinality — event fields (cost, tokens, duration) are stream labels
+
+**Tempo Traces:**
+- LOGOS services (sophia, hermes, apollo) send traces when running
+- Tempo metrics_generator produces service graph / span metrics → Prometheus remote_write
+
+**Troubleshooting:**
 ```bash
-cd logos
-./scripts/stop-otel-stack.sh
+docker logs otel-collector --tail=20
+docker logs tempo --tail=20
+docker logs grafana --tail=20
+docker logs prometheus --tail=20
+
+# Health checks
+curl http://localhost:3200/ready          # Tempo
+curl http://localhost:9090/-/healthy      # Prometheus
+curl http://localhost:3000/api/health     # Grafana
 ```
 
-## Accessing UIs
-
-- **Jaeger**: http://localhost:16686
-  - Search traces by service (sophia, hermes, apollo-cli, apollo-backend, apollo-webapp)
-  - Filter by operation, tags, duration
-  - View service dependency graph
-
-- **Prometheus**: http://localhost:9090
-  - Query metrics
-  - View targets status
-  - Explore time series data
-
-## Service Configuration
-
-Services should use these environment variables:
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4319  # For Python/backend services (gRPC)
-VITE_OTEL_EXPORTER_URL=http://localhost:4320/v1/traces  # For browser/webapp (HTTP)
-```
-
-**Note:** The OTel collector uses ports 4319/4320 (not the default 4317/4318) because Jaeger's OTLP receiver uses 4317 internally.
-
-## Troubleshooting
-
-See `docs/operations/OBSERVABILITY_QUERIES.md` for Jaeger filters and Prometheus query snippets.
-
-### Collector not receiving traces
-1. Check collector logs: `docker logs logos-otel-collector`
-2. Verify collector health: `curl http://localhost:13133/`
-3. Check service OTEL_EXPORTER_OTLP_ENDPOINT configuration
-
-### Jaeger not showing traces
-1. Check Jaeger logs: `docker logs logos-jaeger`
-2. Verify collector → Jaeger connection in collector logs
-3. Check service dropdown in Jaeger UI
-
-### Browser traces not appearing
-1. Verify CORS configuration in otel-collector-config.yaml
-2. Check browser console for OTel errors
-3. Verify VITE_OTEL_EXPORTER_URL points to HTTP endpoint (4318)
-
-## Architecture Details
-
-### Collector Configuration
-
-The OTel collector is configured with:
-
-**Receivers:**
-- OTLP gRPC (port 4317) - for backend services
-- OTLP HTTP (port 4318) - for browser/webapp traces
-- CORS enabled for localhost:5173 (Apollo webapp)
-
-**Processors:**
-- `batch` - batches spans for efficiency (1s timeout, 1024 batch size)
-- `memory_limiter` - prevents OOM (512 MiB limit)
-- `resource` - adds environment=development label
-
-**Exporters:**
-- `jaeger` - exports traces to Jaeger via gRPC (port 14250)
-- `prometheus` - exposes metrics on port 8889
-- `logging` - logs traces for debugging
-
-### Prometheus Scrape Config
-
-Prometheus is configured to scrape:
-- OTel collector metrics (port 8889)
-- Sophia service metrics (port 8001)
-- Hermes service metrics (port 8002)
-- Apollo service metrics (port 8000)
-
-All scrape intervals are set to 15 seconds.
-
-### Storage
-
-**Development:**
-- Jaeger uses in-memory storage (data lost on restart)
-- Prometheus uses a Docker volume for persistence
-
-**Production:**
-- Jaeger should use Cassandra or Elasticsearch
-- Prometheus should use remote storage (e.g., Thanos, Cortex)
-
-## Performance Considerations
-
-- **Batch processor** reduces network overhead by batching spans
-- **Memory limiter** prevents collector crashes under high load
-- **Health checks** ensure services are ready before accepting traffic
-- **CORS** properly configured for browser traces without performance impact
-
-## Next Steps
-
-1. Instrument services with OpenTelemetry SDKs (see issues #334-342)
-2. Set up Grafana dashboards for visualization (see issue #344)
-3. Configure alerting rules in Prometheus
-4. Set up production-grade storage backends
+**Known Limitations:**
+- `claude_code_commit_count_total` and `claude_code_pull_request_count_total` metrics are not currently exported by Claude Code — panels that reference them show 0 (use `or vector(0)`)
+- LOGOS service dashboards (sophia/hermes/apollo) will show "No data" unless those services are running and instrumented

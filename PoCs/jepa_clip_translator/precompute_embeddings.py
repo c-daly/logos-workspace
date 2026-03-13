@@ -149,17 +149,11 @@ class EmbeddingPrecomputer:
         indices = np.linspace(0, n - 1, sample_frames, dtype=int)
         sampled = [frames[i] for i in indices]
 
-        embeddings = []
-        for frame in sampled:
-            inputs = self.clip_processor(images=frame, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            raw = self.clip_model.get_image_features(**inputs)
-            # Older transformers versions return a tensor; newer may return a
-            # ModelOutput with .pooler_output.
-            feat = raw.pooler_output if hasattr(raw, "pooler_output") else raw
-            embeddings.append(F.normalize(feat.squeeze(0), p=2, dim=-1))
-
-        return torch.stack(embeddings).cpu()  # (sample_frames, 768)
+        inputs = self.clip_processor(images=sampled, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        raw = self.clip_model.get_image_features(**inputs)
+        feat = raw.pooler_output if hasattr(raw, "pooler_output") else raw
+        return F.normalize(feat, p=2, dim=-1).cpu()  # (sample_frames, 768)
 
     @torch.no_grad()
     def compute_clip_text_embeddings(

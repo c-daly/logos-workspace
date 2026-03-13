@@ -40,6 +40,8 @@ PoCs/**/*.pdf
 PoCs/**/embedding_cache.json
 PoCs/**/tiny_mind.json
 
+*.h5
+*logs.json
 # Python
 __pycache__/
 *.pyc

@@ -20,27 +20,65 @@ from config import (
     TrainingConfig,
 )
 
-SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embedding translator (V-JEPA 1024-dim token embeddings -> 768-dim CLIP space).
+SYSTEM_PROMPT = """You are an ML experiment optimizer for a JEPA-to-CLIP embedding translator (1024-dim → 768-dim shared embedding space).
 
-PRIMARY OBJECTIVE: maximize TEXT retrieval (txt_R@1, txt_R@5). Image retrieval is already solved (imgR@5 ~0.93). The critical gap is text: current best txt_R@1=0.11, txt_R@5=0.31.
+The task: learn a translator that maps V-JEPA temporal video embeddings into a shared space alongside CLIP image and text embeddings. This is NOT about making JEPA look like CLIP — it’s about finding a shared geometry that works for all modalities.
 
-KEY FINDINGS so far:
-- InfoNCE (contrastive) loss is ESSENTIAL for retrieval — it is the single biggest lever. Use it heavily.
-- Pure MSE/cosine losses produce high cosine similarity but near-zero retrieval. Do NOT rely on them alone.
-- Multi-target losses that include clip_text_mean alongside clip_image significantly help text retrieval.
-- Transformer architectures with InfoNCE achieve the best results.
+You will receive results sorted by txt_R@1. Each result includes imgR@1, imgR@5 (image retrieval) and txtR@1, txtR@5 (text retrieval). The primary objective is to maximize txt_R@1 and txt_R@5. Image retrieval is already solved (imgR@5 ~0.93). **To improve text retrieval, increase the weight on infonce loss** -- infonce is the only loss term that directly trains retrieval behavior. mse/cosine losses improve geometry but not retrieval rank. When the search is plateauing, be bold -- propose genuinely different ideas, not just parameter tweaks.
 
-TO IMPROVE TEXT RETRIEVAL specifically:
-- Add InfoNCE loss terms targeting `clip_text_mean` or `clip_text_first` (not just clip_image).
-- Use bidirectional alignment: loss against both image AND text CLIP embeddings.
-- Try heavier weights on text-target loss terms (e.g. 0.5+ on cosine->clip_text_mean).
-- Warmup with MSE then switch to InfoNCE works well.
-- Lower InfoNCE temperature (0.03-0.07) tends to sharpen retrieval.
+IMPORTANT -- loss function guidance:
+- Vanilla "contrastive" causes training collapse. Do NOT use it.
+- Use "infonce" (false-negative masked InfoNCE) for contrastive objectives -- it is safe and effective.
+- Mixed targets work well: 0.7xmse->clip_text_mean + 0.3xcosine->clip_image improved text retrieval significantly.
+- Good combination: 0.5xmse->clip_image + 0.3xcosine->clip_text_mean + 0.2xinfonce->clip_image
+- For text retrieval specifically: infonce->clip_text_mean is the most direct lever. Try weighting it heavily.
 
-Schema: architecture: {type, hidden_dim, num_blocks, num_layers, num_heads, dropout, activation, use_layer_norm}
-loss.terms: [{function: mse|cosine|infonce, target: clip_image|clip_text_mean|clip_text_first, weight, temperature, label_smoothing}]
-training: {optimizer, lr, lr_min, lr_schedule, warmup_epochs, cooldown_epochs, weight_decay, batch_size, max_epochs, early_stop_patience, grad_clip}
-data: {noise_std, embedding_dropout, num_tokens}"""
+Things worth trying when stuck:
+- Deeper or wider MLPs, or residual nets with bottleneck layers
+- Aggressive LR warmup + cosine decay with long cooldown
+- Multi-target losses: infonce toward both clip_image and clip_text_mean simultaneously
+- Warmup on MSE (geometry anchor), then switch to infonce (retrieval alignment)
+- Very small LR + long training (200-500 epochs) for linear/shallow models
+- Different MSE:cosine:infonce weight ratios
+- Layer norm, dropout, or both — or neither
+- Different activations (silu often outperforms gelu on projection tasks)
+- Per-target infonce: try clip_text_mean or clip_text_first as primary target instead of clip_image
+
+Schema (all fields optional — only include what you’re changing from defaults):
+- architecture: type (linear|mlp|residual|transformer), hidden_dim (64-2048), num_blocks (1-12), num_layers (1-6), num_heads (1-16, must divide hidden_dim evenly), dropout (0.0-0.5), activation (gelu|relu|silu), use_layer_norm (bool)
+  - transformer: self-attention over T temporal tokens before projecting — the ONLY architecture that models cross-token temporal context. num_blocks = transformer encoder layers, num_heads = attention heads.
+  - stages (optional list): build a pipeline of heterogeneous stages instead of a single type. Each stage is a dict with its own type/hidden_dim/etc. Dimensions chain automatically — each stage’s hidden_dim is its output width, except the last stage which always outputs to clip_dim (768). Use this to combine architectures, e.g. residual feature extraction followed by an MLP bottleneck. Example: [{"type": "residual", "hidden_dim": 1024, "num_blocks": 6}, {"type": "mlp", "hidden_dim": 512, "num_layers": 2}]. When stages is set, top-level type/hidden_dim/etc. are ignored.
+- loss.terms: [{function (mse|cosine|infonce), target (clip_image|clip_text_mean|clip_text_first), weight, temperature (0.01-1.0), label_smoothing (0.0-0.2)}]
+- loss.warmup_terms: loss mix for first warmup_epochs epochs; loss.warmup_epochs: int
+- training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
+- data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3), num_tokens (int or null) — for token-level JEPA: number of temporal tokens to use (null = all); for legacy mean-pooled JEPA: number of CLIP frames to average (null = all)
+
+CRITICAL: batch_size must be ≤ 256. Token-level training multiplies effective batch by K=32 — larger values cause GPU OOM on a 24GB card.
+
+Example pipeline config (stages override top-level type):
+```json
+{
+  "experiment_id": "exp_residual_then_mlp",
+  "architecture": {
+    "stages": [
+      {"type": "residual", "hidden_dim": 1024, "num_blocks": 6, "activation": "silu", "dropout": 0.1, "use_layer_norm": true},
+      {"type": "mlp", "hidden_dim": 512, "num_layers": 2, "activation": "gelu", "dropout": 0.05, "use_layer_norm": true}
+    ]
+  },
+  "training": {"lr": 3e-4, "warmup_epochs": 15, "cooldown_epochs": 30, "max_epochs": 300}
+}
+```
+
+Respond with:
+
+## Analysis
+Optionally start with `TARGET: <metric>` (one of: txt_R@1, txt_R@5, R@5) to recommend what to optimize this round — default is txt_R@1.
+What’s working? What’s plateauing? What haven’t we tried?
+
+## Configs
+```json
+[...array of ExperimentConfig dicts...]
+```"""
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +104,8 @@ class LLMConfig:
         return f"{self.provider}/{self.model}"
 
 
-def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_log_path: str | None = None) -> list[ExperimentConfig]:
-    """Call the configured LLM to generate next experiment configs. Returns [] on failure."""
+def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_log_path: str | None = None) -> tuple[list[ExperimentConfig], str | None]:
+    """Call the configured LLM to generate next experiment configs. Returns ([], None) on failure."""
     compact = []
     for r in results:
         c = {k: v for k, v in r.items() if k not in ("best_state", "history")}
@@ -93,14 +131,12 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_
     plateau = len(sorted_results) >= 5 and (best_txt_r1 - sorted_results[4].get("txt_R@1", best_txt_r1)) < 0.01
 
     prompt = (
-        f"Results so far ({len(compact)} experiments). Primary target: txt_R@1.\n"
-        f"Best known: txt_R@1={best_txt_r1:.3f}  txt_R@5={best_txt_r5:.3f}  imgR@5={best_img_r5:.3f}\n"
-        + ("NOTE: older results lack txt_R@1 — they are ranked by imgR@5 as proxy.\n" if best_txt_r1 == 0.0 else "")
-        + f"Goal: push txt_R@1 higher. Text retrieval is far below image retrieval — focus on text-target losses and InfoNCE.\n"
-        + ("Status: PLATEAUING on txt_R@1 — try a genuinely different approach.\n" if plateau else "")
+        f"Current best txt_R@1={best_txt_r1:.4f}  txt_R@5={best_txt_r5:.4f}  imgR@5={best_img_r5:.4f} ({len(compact)} experiments run so far)\n"
+        + ("NOTE: older results ranked by imgR@5 (txt_R@1 not available).\n" if best_txt_r1 == 0.0 else "")
+        + ("Status: PLATEAUING on txt_R@1 — top 5 are within 0.01 of each other. Try something genuinely different.\n" if plateau else "")
         + f"\nTop 5 results:\n{json.dumps(top5, indent=2)}"
         + f"\n\nAll results:\n{json.dumps(sorted_results, indent=2)}"
-        + f"\n\nPropose {num_configs} new ExperimentConfig dicts targeting improved txt_R@1."
+        + f"\n\nPropose {num_configs} new ExperimentConfig dicts."
     )
 
     logger.info("  Calling %s ...", llm_config)
@@ -111,10 +147,10 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_
         text = _call_anthropic(llm_config.model, prompt)
     else:
         print(f"  Unknown provider: {llm_config.provider!r} (supported: openai, anthropic)")
-        return []
+        return [], None
 
     if text is None:
-        return []
+        return [], None
 
     return _parse_configs(text, llm_log_path=llm_log_path)
 
@@ -174,8 +210,15 @@ def _call_anthropic(model: str, prompt: str) -> str | None:
         return None
 
 
-def _parse_configs(text: str, llm_log_path: str | None = None) -> list[ExperimentConfig]:
-    """Extract and parse the JSON config array from the LLM response."""
+_VALID_TARGET_METRICS = {"txt_R@1", "txt_R@5", "R@5", "R@1", "val_cosine_sim"}
+
+
+def _parse_configs(text: str, llm_log_path: str | None = None) -> tuple[list[ExperimentConfig], str | None]:
+    """Extract and parse the JSON config array from the LLM response.
+
+    Returns (configs, recommended_target_metric).
+    recommended_target_metric is None if the coordinator didn't specify one.
+    """
     # Write full response to dedicated LLM log file
     if llm_log_path:
         try:
@@ -196,6 +239,17 @@ def _parse_configs(text: str, llm_log_path: str | None = None) -> list[Experimen
     if analysis:
         logger.info("\n%s\nLLM ANALYSIS:\n%s\n%s", "-" * 70, analysis, "-" * 70)
 
+    # Extract recommended target metric from analysis (e.g. "TARGET: txt_R@5")
+    recommended_target: str | None = None
+    m = re.search(r"^TARGET:\s*([\w@]+)", analysis, re.MULTILINE | re.IGNORECASE)
+    if m:
+        candidate = m.group(1)
+        if candidate in _VALID_TARGET_METRICS:
+            recommended_target = candidate
+            logger.info("  Coordinator recommends target metric: %s", recommended_target)
+        else:
+            logger.info("  Coordinator suggested unknown metric %r — ignoring.", candidate)
+
     # Extract JSON block
     json_str = None
     if "```json" in text:
@@ -209,20 +263,20 @@ def _parse_configs(text: str, llm_log_path: str | None = None) -> list[Experimen
 
     if not json_str:
         print("  Could not extract JSON from LLM response.")
-        return []
+        return [], recommended_target
 
     try:
         configs_json = json.loads(json_str)
     except json.JSONDecodeError as e:
         print(f"  JSON parse error: {e}")
-        return []
+        return [], recommended_target
 
     configs = []
     for d in configs_json:
         if "experiment_id" not in d:
             d["experiment_id"] = f"exp_llm_{uuid.uuid4().hex[:6]}"
         configs.append(ExperimentConfig.from_dict(d))
-    return configs
+    return configs, recommended_target
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +391,7 @@ def generate_next_configs_random(
         if rng.random() < 0.5:
             d["training"]["lr"] = round(_clamp(d["training"]["lr"] * rng.uniform(0.3, 3.0), 1e-6, 1e-2), 7)
         if rng.random() < 0.3:
-            d["training"]["batch_size"] = rng.choice([64, 128, 256, 512])
+            d["training"]["batch_size"] = rng.choice([64, 128, 256])
         if rng.random() < 0.2:
             d["training"]["optimizer"] = rng.choice(["adamw", "adam", "sgd"])
         if rng.random() < 0.2:
@@ -359,13 +413,17 @@ def generate_next_configs(
     num_configs: int = 2,
     llm_config: LLMConfig | None = None,
     llm_log_path: str | None = None,
-) -> list[ExperimentConfig]:
-    """Try LLM first, fall back to random mutation."""
+) -> tuple[list[ExperimentConfig], str | None]:
+    """Try LLM first, fall back to random mutation.
+
+    Returns (configs, recommended_target_metric).
+    recommended_target_metric is None if the coordinator didn't specify one.
+    """
     if llm_config is None:
         llm_config = LLMConfig()
-    configs = _call_llm(all_results, num_configs, llm_config, llm_log_path=llm_log_path)
+    configs, recommended_target = _call_llm(all_results, num_configs, llm_config, llm_log_path=llm_log_path)
     if configs:
         print(f"  LLM ({llm_config}) proposed {len(configs)} configs.")
-        return configs
+        return configs, recommended_target
     print("  LLM unavailable, falling back to random mutation.")
-    return generate_next_configs_random(all_results, num_configs)
+    return generate_next_configs_random(all_results, num_configs), None
