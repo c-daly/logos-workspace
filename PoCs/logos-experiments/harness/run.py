@@ -5,13 +5,17 @@ Usage:
     harness-run <experiment> [--push]
 """
 
+import logging
+import subprocess
 import sys
 import yaml
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from harness import find_experiments_dir
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,3 +57,45 @@ def load_goal(exp_dir: Path) -> Goal:
         environment=raw.get("environment"),
         _raw=raw,
     )
+
+
+class WorktreeInfo(NamedTuple):
+    worktree_path: Path
+    branch_name: str
+    repo_dir: Path
+
+
+def setup_worktree(
+    repo_dir: Optional[Path],
+    experiment_name: str,
+) -> Optional[WorktreeInfo]:
+    """Create a git worktree for an integration experiment."""
+    if repo_dir is None:
+        return None
+
+    branch_name = f"exp/{experiment_name}"
+    worktree_path = repo_dir.parent / f".worktrees/{experiment_name}"
+
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "worktree", "add",
+         "-b", branch_name, str(worktree_path)],
+        check=True, capture_output=True, text=True,
+    )
+
+    logger.info("Created worktree at %s (branch: %s)", worktree_path, branch_name)
+    return WorktreeInfo(
+        worktree_path=worktree_path,
+        branch_name=branch_name,
+        repo_dir=repo_dir,
+    )
+
+
+def cleanup_worktree(repo_dir: Path, worktree_path: Path) -> None:
+    """Remove a worktree but keep the branch for inspection."""
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "worktree", "remove",
+         str(worktree_path), "--force"],
+        check=True, capture_output=True, text=True,
+    )
+    logger.info("Removed worktree at %s (branch kept)", worktree_path)
