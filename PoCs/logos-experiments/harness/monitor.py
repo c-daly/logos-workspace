@@ -140,6 +140,23 @@ class TrainingMonitor:
                             stderr_log.write(line)
                         # Still print stderr for visibility
                         print(line, end="", file=sys.stderr)
+
+                        # Check stderr for NaN too (e.g. tqdm, logging)
+                        if self._check_nan(line):
+                            nan_count += 1
+                            print(f"\n\u26a0\ufe0f  NaN/Inf detected in stderr ({nan_count}/{self.nan_patience})",
+                                  file=sys.stderr)
+                            if nan_count >= self.nan_patience:
+                                killed_reason = f"nan_detected ({nan_count} consecutive)"
+                                proc.send_signal(signal.SIGTERM)
+                                time.sleep(5)
+                                if proc.poll() is None:
+                                    proc.kill()
+                                break
+                        else:
+                            nan_count = 0
+
+                        self._capture_metrics(line, metrics)
                     else:
                         stdout_lines.append(line.rstrip())
                         if stdout_log:
@@ -177,6 +194,13 @@ class TrainingMonitor:
                         if stderr_log:
                             stderr_log.write(line)
                         print(line, end="", file=sys.stderr)
+                        if self._check_nan(line):
+                            nan_count += 1
+                            if nan_count >= self.nan_patience and killed_reason is None:
+                                killed_reason = f"nan_detected ({nan_count} consecutive)"
+                        else:
+                            nan_count = 0
+                        self._capture_metrics(line, metrics)
                     else:
                         stdout_lines.append(line.rstrip())
                         if stdout_log:
