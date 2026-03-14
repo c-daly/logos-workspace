@@ -28,13 +28,35 @@ def _get_event_bus():
         )
 
 
+def _inject_mock_redis(bus, mock_redis):
+    """Inject a mock Redis client into an EventBus instance.
+
+    Scans for the attribute holding the Redis client regardless of name,
+    so the agent isn't locked into a specific private attribute convention.
+    """
+    # Try common attribute names agents might use
+    for attr in ("_redis", "_client", "_conn", "_connection", "_redis_client", "redis", "client"):
+        if hasattr(bus, attr):
+            setattr(bus, attr, mock_redis)
+            return
+    # Fallback: set all None-valued private attrs (likely the unconnected client)
+    for attr in vars(bus):
+        if attr.startswith("_") and getattr(bus, attr) is None:
+            setattr(bus, attr, mock_redis)
+            return
+    raise AttributeError(
+        "Could not find a Redis client attribute on EventBus. "
+        "Store your Redis client as an instance attribute (e.g. self._redis)."
+    )
+
+
 class TestRetryBehavior:
     def test_publish_succeeds_on_first_try(self):
         """Normal publish works without retry."""
         EventBus = _get_event_bus()
         bus = EventBus(redis_url="redis://localhost:6379")
         mock_redis = MagicMock()
-        bus._redis = mock_redis
+        _inject_mock_redis(bus, mock_redis)
 
         bus.publish("events.test", {"key": "value"})
 
@@ -51,7 +73,7 @@ class TestRetryBehavior:
             ConnectionError("Connection lost"),
             None,
         ]
-        bus._redis = mock_redis
+        _inject_mock_redis(bus, mock_redis)
 
         bus.publish("events.test", {"key": "value"})
 
@@ -63,7 +85,7 @@ class TestRetryBehavior:
         bus = EventBus(redis_url="redis://localhost:6379")
         mock_redis = MagicMock()
         mock_redis.publish.side_effect = ConnectionError("Connection lost")
-        bus._redis = mock_redis
+        _inject_mock_redis(bus, mock_redis)
 
         with pytest.raises(ConnectionError):
             bus.publish("events.test", {"key": "value"})
@@ -80,7 +102,7 @@ class TestRetryBehavior:
             ConnectionError("Connection lost"),
             None,
         ]
-        bus._redis = mock_redis
+        _inject_mock_redis(bus, mock_redis)
 
         delays = []
         with patch("time.sleep", side_effect=lambda d: delays.append(d)):
@@ -96,7 +118,7 @@ class TestRetryBehavior:
         bus = EventBus(redis_url="redis://localhost:6379")
         mock_redis = MagicMock()
         mock_redis.publish.side_effect = ValueError("Bad message format")
-        bus._redis = mock_redis
+        _inject_mock_redis(bus, mock_redis)
 
         with pytest.raises(ValueError):
             bus.publish("events.test", {"key": "value"})
