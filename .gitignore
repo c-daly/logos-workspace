@@ -44,6 +44,11 @@ PoCs/**/*.pdf
 PoCs/**/embedding_cache.json
 PoCs/**/tiny_mind.json
 
+*.h5
+*logs.json
+*.log
+run_logs/
+PoCs/vl_jepa/logs/
 # Python
 __pycache__/
 *.pyc
@@ -51,3 +56,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+PoCs/vl_jepa/checkpoints/
+*.pt

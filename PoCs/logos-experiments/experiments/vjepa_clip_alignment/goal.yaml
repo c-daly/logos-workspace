@@ -1,0 +1,84 @@
+objective: >
+  Implement VL-JEPA (arXiv 2512.10942) as faithfully as hardware allows.
+  Train a Transformer Predictor that maps frozen V-JEPA visual tokens into a shared
+  embedding space, jointly with a fine-tuned CLIP text encoder, using bi-directional
+  InfoNCE loss. Enable text-to-video and video-to-text retrieval for LOGOS.
+
+architecture:
+  x_encoder:
+    model: V-JEPA ViT-H/14
+    status: frozen
+    source: precomputed token embeddings — msrvtt_embeddings.h5 jepa_embeddings (7010, 32, 1024)
+    note: cannot run ViT-H on 8.6GB GPU; use precomputed tokens
+  predictor:
+    type: Transformer (TransformerEncoder, PyTorch)
+    input: (B, 32, 1024) visual token sequence
+    output: (B, shared_dim) after mean-pool + linear head
+    layers: 4, heads: 8, ffn_dim: 2048
+    trains: yes — primary trainable component
+  y_encoder:
+    model: CLIP ViT-L/14 text encoder
+    status: fine-tuned at 0.05x base LR
+    input: raw MSR-VTT captions (text strings)
+    output: (B, shared_dim) after linear head
+    source: openai/CLIP — must be installed in venv
+  shared_space:
+    dim: 512
+    note: paper uses 1536; 512 scaled for our GPU/dataset size
+  loss: bi-directional InfoNCE (CLIP-style) in shared_dim space
+
+data:
+  dataset: MSR-VTT
+  videos: 7010
+  captions_per_video: 20 (all available)
+  raw_captions: ~/projects/LOGOS/PoCs/jepa_clip_translator/data/MSR-VTT/train_val_annotation/train_val_videodatainfo.json
+  jepa_tokens: ~/projects/LOGOS/PoCs/jepa_clip_translator/msrvtt_embeddings.h5 — jepa_embeddings (7010, 32, 1024)
+  split: 80/20 train/val by video_id
+
+success_criteria:
+  primary:
+    retrieval_accuracy_at_5: 0.80
+    retrieval_accuracy_at_1: 0.50
+  secondary:
+    mean_cosine_similarity: 0.82
+  guard:
+    training_stability: 1.0
+
+eval:
+  script: eval/test_alignment.py
+  note: >
+    eval script PASS/FAIL logic only checks cosine >= 0.70 and stability.
+    Read [METRIC] lines directly and compare against success_criteria above.
+  projector_interface:
+    load: load(checkpoint_path=None) -> state
+    project: project(state, vjepa_tokens_or_embs) -> (N, 768) np.ndarray
+    note: >
+      project() input may be mean-pooled (N, 1024) for eval compatibility.
+      Internally maps through predictor to shared space, then unprojects to 768-dim
+      for cosine comparison with CLIP text embeddings. OR outputs 512-dim if eval
+      data is also projected to 512-dim shared space.
+
+constraints:
+  do_not: fine-tune V-JEPA X-Encoder (too large for available GPU)
+  fine_tune: CLIP text Y-Encoder at 0.05x base LR — now required
+  gpu_memory_target_gb: 8.6
+  max_hours_per_run: 4
+  max_total_gpu_hours: 40
+  nan_early_stop_batches: 10
+
+resources:
+  paper: https://arxiv.org/abs/2512.10942
+  clip: https://github.com/openai/CLIP
+  jepa: https://github.com/facebookresearch/jepa
+
+prior_work:
+  path: ~/projects/LOGOS/PoCs/jepa_clip_translator
+  summary: >
+    75 experiments with frozen MLP projector, frozen CLIP text. All plateaued at
+    cosine~0.30, R@5~0.24. Root cause: frozen encoder spaces have zero semantic
+    alignment (R@1=0% with optimal projection). Fine-tuning text encoder is required.
+
+notes: >
+  Original constraint "do not fine-tune encoders" overridden per user instruction.
+  Goal updated 2026-03-10 to implement full VL-JEPA approach.
+  CLIP must be installed: pip install git+https://github.com/openai/CLIP.git

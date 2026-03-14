@@ -20,13 +20,22 @@ class ArchitectureConfig:
     stages: list | None = None  # if set, builds a pipeline; top-level type/etc. ignored
 
 
+VALID_FUNCTIONS = {"mse", "cosine", "contrastive", "infonce"}
+VALID_TARGETS = {"clip_image", "clip_text_mean", "clip_text_first"}
+
 @dataclass
 class LossTerm:
-    function: Literal["mse", "cosine", "contrastive"] = "mse"
-    target: Literal["clip_image", "clip_text_mean", "clip_text_first"] = "clip_image"
+    function: str = "mse"  # replaces Literal["mse","cosine","contrastive"]
+    target: str = "clip_image"
     weight: float = 1.0
     temperature: float = 0.07
     label_smoothing: float = 0.0
+
+    def __post_init__(self):
+        if self.function not in VALID_FUNCTIONS:
+            raise ValueError(f"Unknown loss function {self.function!r}. Valid: {VALID_FUNCTIONS}")
+        if self.target not in VALID_TARGETS:
+            raise ValueError(f"Unknown target {self.target!r}. Valid: {VALID_TARGETS}")
 
 
 @dataclass
@@ -53,6 +62,10 @@ class TrainingConfig:
     max_epochs: int = 200
     early_stop_patience: int = 10
     grad_clip: float = 1.0
+
+    def __post_init__(self):
+        if self.batch_size > 256:
+            self.batch_size = 256
 
 
 @dataclass

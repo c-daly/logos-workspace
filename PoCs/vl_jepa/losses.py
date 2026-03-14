@@ -40,13 +40,18 @@ def _infonce(
     target: torch.Tensor,
     temperature: float = 0.07,
     label_smoothing: float = 0.0,
+    batch_indices: list | None = None,
     **_,
 ) -> torch.Tensor:
-    """InfoNCE with false-negative masking support."""
+    """InfoNCE with optional false-negative masking."""
     pred_n = F.normalize(pred, dim=-1)
     target_n = F.normalize(target, dim=-1)
     B = pred.shape[0]
     sim = pred_n @ target_n.T / temperature
+    if batch_indices is not None:
+        vi = torch.tensor(batch_indices, device=pred.device)
+        fn_mask = (vi.unsqueeze(1) == vi.unsqueeze(0)) & ~torch.eye(B, dtype=torch.bool, device=pred.device)
+        sim = sim.masked_fill(fn_mask, -1e9)
     labels = torch.arange(B, device=pred.device)
     return 0.5 * (
         F.cross_entropy(sim, labels, label_smoothing=label_smoothing)
@@ -74,6 +79,7 @@ def compute_loss(
     clip_image: torch.Tensor,
     clip_text: torch.Tensor,
     terms: list,
+    batch_indices: list | None = None,
 ) -> dict:
     """Weighted sum of loss terms. Each term is a dict or LossTerm."""
     total = torch.tensor(0.0, device=pred.device)
@@ -88,7 +94,12 @@ def compute_loss(
         # If pred has a token dimension that target lacks, pool pred first.
         # (e.g. clip_text targets are (B, 768) while pred may be (B, T, 768))
         effective_pred = pred.mean(dim=1) if pred.dim() > target.dim() else pred
-        raw = _PRIMITIVES[t.function](effective_pred, target, temperature=t.temperature, label_smoothing=t.label_smoothing)
+        raw = _PRIMITIVES[t.function](
+            effective_pred, target,
+            temperature=t.temperature,
+            label_smoothing=t.label_smoothing,
+            batch_indices=batch_indices if t.function == "infonce" else None,
+        )
         if isinstance(raw, dict):
             loss_val = raw["loss"]
             if "accuracy" in raw and acc is None:

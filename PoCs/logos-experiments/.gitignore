@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+experiments/*/checkpoints/*.pt
+experiments/*/checkpoints/*.npy
+experiments/*/logs/
+data/

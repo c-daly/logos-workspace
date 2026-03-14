@@ -30,6 +30,8 @@ class LinearTranslator(nn.Module):
         self.linear = nn.Linear(input_dim, output_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         return F.normalize(self.linear(x), dim=-1)
 
 
@@ -52,13 +54,15 @@ class MLPTranslator(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         return F.normalize(self.net(x), dim=-1)
 
 
 class ResidualTranslator(nn.Module):
     def __init__(
         self, input_dim: int, output_dim: int, hidden_dim: int,
-        num_blocks: int, dropout: float, activation: str, use_layer_norm: bool,
+        num_blocks: int, dropout: float = 0.1, activation: str = "gelu", use_layer_norm: bool = True,
     ):
         super().__init__()
         proj = [nn.Linear(input_dim, hidden_dim)]
@@ -79,11 +83,13 @@ class ResidualTranslator(nn.Module):
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
-            nn.init.trunc_normal_(m.weight, std=0.02)
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="linear")
             if m.bias is not None:
                 nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         x = self.input_proj(x)
         for block in self.blocks:
             x = block(x)
@@ -185,6 +191,8 @@ class PipelineTranslator(nn.Module):
         self.pipeline = nn.ModuleList(modules)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
+            x = x.mean(dim=1)
         for stage in self.pipeline:
             x = stage(x)
         return F.normalize(x, dim=-1)
@@ -201,7 +209,11 @@ class TransformerTranslator(nn.Module):
         self.stage = _TransformerStage(input_dim, output_dim, hidden_dim, num_blocks, num_heads, dropout, use_layer_norm)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.normalize(self.stage(x), dim=-1)
+        out = self.stage(x)
+        # Pool over token dimension when input has 3 dims (batch, tokens, dim)
+        if out.dim() == 3:
+            out = out.mean(dim=1)
+        return F.normalize(out, dim=-1)
 
 
 def build_translator(cfg: ArchitectureConfig, input_dim: int, output_dim: int) -> nn.Module:
