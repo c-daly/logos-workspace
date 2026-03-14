@@ -1,80 +1,65 @@
 # LOGOS Project Status
 
-**Generated:** 2026-03-11
+**Generated:** 2026-03-14
 **Foundry Version:** v0.7.0 (all repos at v0.7.0)
 
 ---
 
-## Recent Work (since Mar 4)
+## Recent Work (since last status: Mar 4)
 
-### V-JEPA/CLIP Translator PoC — Major Advance (Mar 10-11)
+The past 10 days shifted from infrastructure blitz to research and design. No service-repo code changes landed — all energy went into the V-JEPA translator PoC and design documentation for upcoming cognitive loop work.
 
-The grounded perception research track has seen the most significant progress in the project's history, driven by an autonomous experiment framework (`logos-experiments` harness).
+### 1. V-JEPA Token-Grid PoC (Mar 5-13)
 
-**What was built:**
-- A full JEPA-to-CLIP translation training pipeline in `PoCs/jepa_clip_translator/` on branch `full-jepa-token-grid` in logos-workspace.
-- Modules: `translator.py` (linear/MLP/residual architectures), `train.py` (early stopping, checkpointing), `evaluate.py` (R@1, R@5, R@10 retrieval metrics), `coordinator.py` (experiment log + config generation), `losses.py` (MSE, cosine, InfoNCE, combined), `precompute_embeddings.py` (HDF5 storage), `data_loader.py` (MSR-VTT with download fallback).
-- Colab notebook for cloud GPU precomputation.
-- Token-level V-JEPA embedding support added (latest two commits on `full-jepa-token-grid`).
+Major research effort in logos-workspace. End-to-end PoC for translating V-JEPA temporal token embeddings into CLIP space, with an autonomous LLM-guided hyperparameter search system.
 
-**Autonomous experiment framework results:**
-- The `logos-experiments` harness ran the `vjepa_clip_alignment` ticket overnight using a RunPod pod (2x RTX 3090, ~$1.30 total cost).
-- 75 experiments logged in `experiment_log.json`; 3 formal harness attempts tracked in `status.yaml`.
-- Best model: **ResidualTranslator** (checkpoints_v7), warm-started from `exp_027` checkpoint.
+- **logos-workspace PR #4** (OPEN): V-JEPA token-grid PoC with autonomous hyperparameter search
+- Token-level V-JEPA embeddings `(B, 32, 1024)` — 32 temporal tokens per video, no mean-pooling
+- Translator architectures tested: linear, MLP, residual, transformer, multi-stage pipelines
+- Loss functions: MSE, cosine, InfoNCE (false-negative masked), mixed targets
+- Autonomous search via `coordinator.py` using gpt-5.4 for LLM-guided config generation
+- **Best result:** `txt_R@1 = 0.371` (target: 0.42), `img_R@5 = 0.944`
+- 80+ experiments across 15+ rounds on MSR-VTT
+- Key finding: InfoNCE is the viable retrieval loss; vanilla contrastive causes training collapse
 
-**Best results (attempt 3, v7 checkpoint, MSR-VTT, 1402 videos):**
+This directly informs the universal embedding layer design and unblocks decisions about JEPA-to-CLIP translation feasibility.
 
-| Metric | Value | Threshold |
-|--------|-------|-----------|
-| R@1 (pool=1402) | **0.474** | — |
-| R@5 (pool=1402) | **0.749** | — |
-| R@1 (pool=100) | 0.83 | — |
-| R@5 (pool=100) | 0.96 | — |
-| Mean cosine similarity | 0.7114 | >= 0.70 |
-| Training stability | 1.0 | no NaN/Inf |
+### 2. Design Documentation (Mar 5-10)
 
-**Harness verdict: PASS.** This closes the research question posed in sophia #76.
+Three design documents landed in the workspace:
 
-**Architecture that worked:**
-- ResidualTranslator: 1024 proj_in -> 4x ResidualBlock -> 768 proj_out -> L2-normalize
-- Phase 1 (v6, 235 epochs): 0.5*MSE + 0.3*CosLoss + 0.2*InfoNCE, warm-started from exp_027
-- Phase 2 (v7, 61 epochs): 0.8*CosLoss + 0.2*InfoNCE fine-tuning, pushed cosine above threshold
-- Earlier coordinator exploration (exp_001 through exp_075) established the residual architecture advantage
+- **Ontology evolution design** (logos-workspace PR #3, merged Mar 5): Design for emergent type discovery in the knowledge graph
+- **Entity resolution design** (`docs/plans/2026-03-06-entity-resolution-design.md`): Non-linguistic alias detection via cosine triage + hypothesis accumulation
+- **Entity resolution implementation plan** (`docs/plans/2026-03-06-entity-resolution-plan.md`): 7 TDD tasks spanning hermes and sophia, ready to execute
+- **Universal embedding layer design** (`docs/plans/2026-03-06-universal-embedding-layer-design.md`): Multi-head autoencoder architecture — JEPA/CLIP/text input heads, shared trunk whose internal representation IS the universal space
 
-**Checkpoints saved:**
-- `best_translator_exp_027_residual_mse_then_tiny_cosine_finish.pt` (cosine=0.785, used as warm-start for v6/v7) — in `PoCs/jepa_clip_translator/`
-- `checkpoints_v7/best_vljepa_v7.pt` (final passing checkpoint) — on RunPod network volume
+### 3. No Service-Repo Changes
 
-**Branch status:** `full-jepa-token-grid` has 2 commits ahead of `main` (token-level embedding support in `translator.py`, `coordinator.py`, `precompute_embeddings.py`, `search.py`, and tests). No PR yet.
+logos, sophia, hermes, talos, and apollo have had no new commits or merged PRs since the March 4 infrastructure blitz. The previous session's ~25 PRs are fully settled.
 
 ---
 
 ## In Flight
 
-- **logos-workspace `full-jepa-token-grid`:** Token-level V-JEPA embedding support. Needs PR to main before this work is lost.
-- **logos #499 epic — KG Maintenance (Sophia's Graph Reasoning Agency):** Multiple open stories, all at `status:todo`:
-  - #515: Migrate type_definition nodes to real UUIDs
-  - #508: Maintenance Scheduler — When and How Jobs Run
-  - #507: Competing Edges & Confidence Model
-  - #506: Relationship Inference — Taxonomic Scaffolding
-  - #505: Ontology Evolution — Emergent Type Discovery
-  - #504: Type Correction — Centroid-Based Reclassification
-  - #503: Entity Resolution — Alias Detection and Merging (priority:high)
-  - #501: Ontology Pub/Sub Distribution (priority:high)
+| PR | Repo | Title | Status | Notes |
+|----|------|-------|--------|-------|
+| #4 | logos-workspace | V-JEPA token-grid PoC with autonomous hyperparameter search | OPEN | 105k additions; research PoC, not production code |
 
 ---
 
 ## Blocked
 
-- **logos #464, #463:** Depend on upstream ontology work in #460 and #461. No progress since last status.
-- **sophia #76:** Still marked OPEN. The research question (can V-JEPA embed into CLIP space?) is answered. The remaining scope is engineering: wiring the trained ResidualTranslator into sophia's `JEPARunner` interface and exposing a testable endpoint. No longer research-blocked, but has no active PR.
+| Issue | Repo | Title | Blocked On |
+|-------|------|-------|------------|
+| #464 | logos | Update M3 planning tests for flexible ontology | #460, #461 (upstream ontology work) |
+| #463 | logos | Validate M4 demo end-to-end with flexible ontology | #460, #461 (upstream ontology work) |
 
 ---
 
 ## Open Issue Summary
 
 | Repo | Open Issues |
-|------|------------|
+|------|-------------|
 | logos | 46 |
 | sophia | 3 |
 | hermes | 0 |
@@ -83,77 +68,134 @@ The grounded perception research track has seen the most significant progress in
 | logos-workspace | 0 |
 | **Total** | **50** |
 
----
+No issues opened or closed since March 4.
 
-## Notable Open Issues by Domain
+### logos — notable open issues by area
 
-### KG Maintenance (logos #499 epic, status:in-progress)
-Stories #501, #503, #504, #505, #506, #507, #508, #515 — all todo. Highest priority: #501 (pub/sub, hermes side not yet wired), #503 (entity resolution).
+**KG Maintenance epic (#499, status:in-progress, priority:high):**
+- #501: Ontology Pub/Sub Distribution (priority:high) — infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
+- #503: Entity Resolution — Alias Detection and Merging (priority:high) — design + implementation plan ready, not yet started
+- #504: Type Correction — Centroid-Based Reclassification (priority:medium)
+- #505: Ontology Evolution — Emergent Type Discovery (priority:medium) — design doc landed
+- #506: Relationship Inference — Taxonomic Scaffolding and Missing Edges (priority:medium)
+- #507: Competing Edges & Confidence Model (priority:medium)
+- #508: Maintenance Scheduler — When and How Jobs Run (priority:medium) — scheduler framework landed in sophia #137
 
-### Learning & Memory (logos #415 epic)
-Stories #411 (hierarchical memory infra), #412 (event-driven reflection), #413 (selective diary), #414 (episodic memory), sophia #101 (session boundaries/ephemeral node lifecycle). Prerequisites unmet — not started.
+**Learning & Memory epic (#415, priority:high):**
+- #411: Hierarchical Memory Infrastructure (priority:high)
+- #412: Event-driven Reflection System (priority:high)
+- #413: Selective Diary Entry Creation (priority:medium)
+- #414: Episodic Memory & Learning (priority:high)
+- #416: Testing Sanity — prerequisite to learning & memory work (priority:critical)
 
-### Flexible Ontology Cleanup (logos #458-#465)
-Blocked subset: #463, #464 (depend on #460, #461). Others in backlog.
+**Flexible Ontology cleanup (#458-465):**
+- #458: Update ontology with lessons learned from TinyMind (priority:medium)
+- #460: Update sophia planner for flexible ontology (priority:medium)
+- #461: Update downstream repos for flexible ontology (priority:medium)
+- #462: Update pick-and-place test data for flexible ontology (priority:medium)
+- #463: Validate M4 demo end-to-end (priority:medium, blocked)
+- #464: Update M3 planning tests (priority:medium, blocked)
+- #465: Implement capability catalog in flexible ontology (priority:medium)
 
-### CWM Consolidation
-- **logos #496:** Consolidate CWM modules into HCG ontology types and retire `logos_cwm_e` — priority:high, no PR.
+**OTel/Observability:**
+- #321: Cross-service coverage gaps
+- #335, #338, #341: Endpoint-level OTel spans (Sophia, Hermes, Apollo)
+- #339, #342: OTel testing & documentation (Hermes, Apollo)
+- #340: Apollo OTel SDK integration (priority:critical) — may be partially addressed by merged PR #156
 
-### Observability (logos #321 epic)
-Stories #335, #338-#342 (OTel instrumentation across sophia, hermes, apollo). Not started.
+**Infrastructure & Other:**
+- #515: Migrate type_definition nodes from fabricated type_* IDs to real UUIDs
+- #498: PM agent: detect undocumented new functionality during status updates
+- #496: Consolidate CWM modules into HCG ontology types (priority:high)
+- #481: Centralize test data seeder script
+- #469: Centralize Redis infrastructure — largely done via #500/#512, candidate for closure
+- #447: Documentation consolidation (priority:medium)
+- #433: Standardize LOGOS repos
+- #420: Standardize testing infrastructure
+- #416: Testing Sanity (priority:critical)
+- #409: Standardize developer scripts
+- #403: Deprecate planner_stub in favor of HCGPlanner
+- #311: Apollo authentication and authorization (priority:high, deferred per non-goals)
+- #317: Advanced graph layouts (priority:low)
+- #267, #264, #265, #246: Persona diary features (priority:medium)
+- #135: Developer onboarding guide (priority:medium)
+- #91: OpenAPI validation tests (priority:high)
 
-### Perception / JEPA (sophia #76)
-Research phase complete. Engineering phase (sophia integration, testable endpoints) is the next milestone.
+### sophia — open issues (3)
+- #101: Define session boundaries and ephemeral node lifecycle (priority:medium)
+- #76: Implement JEPA PoC backend — **98+ days stale as an issue**, but related V-JEPA research is actively happening in logos-workspace
+- #20: Extend HCG + Executor to support general tool actions (priority:medium)
 
-### Other
-- sophia #20: Extend HCG + Executor to support general tool actions
-- logos #498: PM agent — detect undocumented new functionality during status updates
-- logos #135: Developer onboarding guide (D2)
+### talos — open issues (1)
+- #31: Add coverage reporting and audit skip conditions
 
 ---
 
 ## Progress Against Vision Goals
 
-### 1. Cognitive Loop Completion
-**Status: Substantially in place.** Redis event bus (`logos_events`, `EventBus`) is live. Sophia's maintenance scheduler and pub/sub distribution are deployed (sophia PRs #136, #137 merged). The loop can fire — open work is making it robust and completing the KG maintenance agency.
+### 1. Complete the cognitive loop — INFRASTRUCTURE READY, NEXT STORIES DESIGNED
 
-### 2. Grounded Perception via JEPA
-**Status: Research complete, engineering pending.** The V-JEPA -> CLIP translation problem is solved. R@1=0.474, R@5=0.749 on MSR-VTT full validation (1402 videos). Token-level embeddings are supported. The remaining work is productizing: wiring the ResidualTranslator (checkpoints_v7) into sophia's `JEPARunner` interface and exposing a testable endpoint (sophia #76).
+The infrastructure phase completed March 4 (Redis event bus, ontology pub/sub, maintenance scheduler). Since then, the focus shifted to designing the next layer of cognitive loop work. Entity resolution (#503) has both a design doc and a 7-task TDD implementation plan ready to execute. Ontology evolution (#505) has a design doc. No implementation code has landed in the 10 days since — the service repos are waiting for these designs to be picked up.
 
-### 3. Flexible Ontology
-**Status: Active, partially blocked.** Ontology hierarchy restructured (logos #510 merged). `get_all_type_definitions()` added (logos #514 merged). Type centroid collection and seeder landed (logos #494 merged). Remaining: UUID migration (#515), blocked milestones (#463, #464).
+**Ready to execute:** Entity resolution (#503)
+**Designed but not planned:** Ontology evolution (#505)
+**Still needs design:** Feedback processing, type correction (#504), relationship inference (#506)
 
-### 4. Memory and Learning
-**Status: Not started.** All prerequisite issues (#411-#414, sophia #101) remain open. Session boundary semantics (#101) is a prerequisite for ephemeral node lifecycle, which gates episodic memory.
+### 2. Grounded perception via JEPA — REACTIVATED VIA RESEARCH
 
-### 5. Planning Execution
-**Status: Stalled.** sophia #20 (general tool actions in HCG + Executor) is open with no recent activity. No planning-related PRs since the cognitive loop foundation landed in February.
+The V-JEPA token-grid PoC (logos-workspace PR #4) represents significant research investment. 80+ experiments translating V-JEPA temporal tokens into CLIP space, with autonomous LLM-guided hyperparameter search. Best txt_R@1 = 0.371 against a 0.42 target — close but not yet there. This directly validates (or will invalidate) the JEPA-to-CLIP translation approach that underpins the universal embedding layer design.
 
-### 6. Embodiment via Talos
-**Status: Paused by design.** One open issue in talos (#31, test coverage audit). No active work — correct per current priority ordering.
+sophia #76 (JEPA PoC backend) is 98+ days stale as a GitHub issue, but the active research in the workspace is the real continuation of this work. **Recommend updating #76 to reference the workspace PoC results once the PR is merged.**
 
-### 7. Infrastructure and Observability
-**Status: CI/CD solid, observability unstarted.** All repos pinned to `ci/v2`, Redis centralized, foundry at v0.7.0. OTel instrumentation epic (#321) has no active PRs.
+### 3. Flexible ontology — STALLED
 
-### 8. Documentation and Testing
-**Status: Good shape.** CLAUDE.md consolidated across all repos, ecosystem docs cleaned up, duplicate docs removed. Onboarding guide (#135) still open.
+No new work since ontology hierarchy restructure (#510) merged March 2. Downstream cleanup issues (#458-465) remain open. #464 and #463 are still blocked on #460/#461. Type_definition UUID migration (#515) untouched. The reified model is implemented but downstream propagation has stalled for 12 days.
+
+### 4. Memory and learning — NOT STARTED
+
+No change. Epic #415 and stories (#411-414) still waiting. Testing sanity (#416, priority:critical) remains the prerequisite. The Redis/event infrastructure that landed March 4 provides the foundation, but no implementation work has begun.
+
+### 5. Planning and execution — PAUSED
+
+No change. Planner stub deprecation (#403) still open. Still blocked on flexible ontology downstream updates (#460).
+
+### 6. Embodiment via Talos — PAUSED
+
+No change. Correctly deprioritized.
+
+### 7. Infrastructure and observability — STABLE
+
+No new infrastructure work since March 4. The CI discipline tooling, version pinning, and Redis infrastructure from that session remain the current state. OTel gaps (#335, #338, #340, #341) still open.
+
+### 8. Documentation and testing — DESIGN DOCS ACTIVE
+
+Three design docs landed in the workspace (entity resolution, universal embedding layer, ontology evolution). Service-level documentation unchanged. Testing gaps (#416, #420, #91) still open.
 
 ---
 
-## Autonomous Experiment Framework
+## Stale / Drift
 
-The `logos-experiments` harness (`/home/fearsidhe/projects/claude_autonomous/logos-experiments/`) is operational and has demonstrated end-to-end autonomous research capability:
-- Structured tickets via `goal.yaml` and `constraints.yaml` with an associated eval suite.
-- Ran the `vjepa_clip_alignment` ticket: 3 formal attempts, iterative architecture search, autonomous RunPod pod management.
-- Passed on attempt 3. Total GPU cost: ~$1.30. Full audit trail in `journal/` and `status.yaml`.
+**Stale issues (>30 days no activity):**
+- sophia #76: JEPA PoC backend (last issue activity: Dec 6, 2025) — 98+ days stale, but related research is active in workspace
 
-This is relevant to the autonomous research agent design space. Consider logging results to the Obsidian vault (papers track).
+**Potential closures:**
+- logos #469 (Centralize Redis infrastructure): Core work done in logos #500/#512. Review whether remaining scope justifies keeping open.
+- logos #501 (Ontology Pub/Sub Distribution): Significant implementation landed (sophia #136, hermes #95). Review remaining scope.
+- logos #508 (Maintenance Scheduler): Core scheduler framework landed in sophia #137. Review remaining scope.
+- logos #340 (Apollo OTel SDK): Apollo OTel already merged (PR #156, Feb 16). Triage whether this is actually done.
+
+**Reconciliation flags:**
+- Many merged PRs from the March 4 blitz lack linked issues (infrastructure/docs PRs). This is expected for that type of work but noted for the record.
+- logos #499 (KG Maintenance epic) is labeled `status:in-progress` but has no open PR. Correct status — it's an epic with active sub-stories.
 
 ---
 
-## Drift / Reconciliation Notes
+## Observations
 
-- **sophia #76** should be updated to reflect its new engineering scope (wiring the trained model into sophia) or closed and replaced with a more specific engineering ticket. It is no longer a research spike.
-- **`full-jepa-token-grid` branch** has unmerged work (token-level V-JEPA support). A PR should be opened to preserve it.
-- **logos #499 epic** has 8 open stories — none individually assigned or marked `status:in-progress`. Consider marking #503 and #501 as next to drive the epic forward.
-- **logos #496** (CWM consolidation, priority:high) has no PR activity. Candidate for next focus once a KG maintenance story lands.
+**The project is in a design-then-build transition.** The March 4 infrastructure blitz created the foundation. The past 10 days produced design docs and research results. The service repos are now waiting for implementation work to resume.
+
+**The V-JEPA PoC is the most significant recent development.** It's the first serious attempt to validate the JEPA-to-CLIP translation that the universal embedding layer depends on. The results (0.371 vs 0.42 target) suggest the approach is viable but needs refinement.
+
+**Entity resolution (#503) is the most ready-to-execute story.** Full design + 7-task TDD implementation plan. This is the natural next pick for coding work.
+
+**Three issues may be closeable** (#469, #501, #508) — their core work has landed but the issues haven't been formally closed.
