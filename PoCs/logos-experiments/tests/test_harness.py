@@ -240,8 +240,8 @@ class TestMonitor:
 
     def test_nan_resets_on_clean_line(self):
         from harness.monitor import TrainingMonitor
-        # One NaN then clean lines — should NOT kill, and nan_detected
-        # reflects final state (clean) not history
+        # One NaN then clean lines — should NOT kill, but nan_detected
+        # reflects that NaN was ever seen (nan_ever_seen semantics)
         script = (
             "import time\n"
             "print('step=0 loss=nan'); time.sleep(0.05)\n"
@@ -252,7 +252,8 @@ class TestMonitor:
         result = monitor.run([sys.executable, "-c", script])
 
         assert result.killed_reason is None  # Didn't hit patience
-        assert result.succeeded is True       # Clean exit after recovery
+        assert result.nan_detected is True    # NaN was seen (ever)
+        assert result.exit_code == 0          # Clean exit
 
     def test_nonzero_exit_code(self):
         from harness.monitor import TrainingMonitor
