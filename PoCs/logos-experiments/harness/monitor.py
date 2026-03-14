@@ -113,77 +113,78 @@ class TrainingMonitor:
 
             import selectors
             sel = selectors.DefaultSelector()
-            sel.register(proc.stdout, selectors.EVENT_READ)
-            sel.register(proc.stderr, selectors.EVENT_READ)
+            try:
+                sel.register(proc.stdout, selectors.EVENT_READ)
+                sel.register(proc.stderr, selectors.EVENT_READ)
 
-            while proc.poll() is None:
-                # Check timeout
-                elapsed = time.time() - start_time
-                if elapsed > self.timeout_seconds:
-                    killed_reason = f"timeout ({self.timeout_seconds/3600:.1f}h)"
-                    proc.send_signal(signal.SIGTERM)
-                    time.sleep(5)
-                    if proc.poll() is None:
-                        proc.kill()
-                    break
+                while proc.poll() is None:
+                    # Check timeout
+                    elapsed = time.time() - start_time
+                    if elapsed > self.timeout_seconds:
+                        killed_reason = f"timeout ({self.timeout_seconds/3600:.1f}h)"
+                        proc.send_signal(signal.SIGTERM)
+                        time.sleep(5)
+                        if proc.poll() is None:
+                            proc.kill()
+                        break
 
-                # Read available output
-                for key, _ in sel.select(timeout=1.0):
-                    line = key.fileobj.readline()
-                    if not line:
-                        continue
+                    # Read available output
+                    for key, _ in sel.select(timeout=1.0):
+                        line = key.fileobj.readline()
+                        if not line:
+                            continue
 
-                    is_stderr = key.fileobj == proc.stderr
+                        is_stderr = key.fileobj == proc.stderr
 
-                    if is_stderr:
-                        stderr_lines.append(line.rstrip())
-                        if stderr_log:
-                            stderr_log.write(line)
-                        # Still print stderr for visibility
-                        print(line, end="", file=sys.stderr)
+                        if is_stderr:
+                            stderr_lines.append(line.rstrip())
+                            if stderr_log:
+                                stderr_log.write(line)
+                            # Still print stderr for visibility
+                            print(line, end="", file=sys.stderr)
 
-                        # Check stderr for NaN too (e.g. tqdm, logging)
-                        if self._check_nan(line):
-                            nan_count_err += 1
-                            print(f"\n\u26a0\ufe0f  NaN/Inf detected in stderr ({nan_count_err}/{self.nan_patience})",
-                                  file=sys.stderr)
-                            if nan_count_err >= self.nan_patience:
-                                killed_reason = f"nan_detected ({nan_count_err} consecutive, stderr)"
-                                proc.send_signal(signal.SIGTERM)
-                                time.sleep(5)
-                                if proc.poll() is None:
-                                    proc.kill()
-                                break
+                            # Check stderr for NaN too (e.g. tqdm, logging)
+                            if self._check_nan(line):
+                                nan_count_err += 1
+                                print(f"\n\u26a0\ufe0f  NaN/Inf detected in stderr ({nan_count_err}/{self.nan_patience})",
+                                      file=sys.stderr)
+                                if nan_count_err >= self.nan_patience:
+                                    killed_reason = f"nan_detected ({nan_count_err} consecutive, stderr)"
+                                    proc.send_signal(signal.SIGTERM)
+                                    time.sleep(5)
+                                    if proc.poll() is None:
+                                        proc.kill()
+                                    break
+                            else:
+                                nan_count_err = 0
+
+                            self._capture_metrics(line, metrics)
                         else:
-                            nan_count_err = 0
+                            stdout_lines.append(line.rstrip())
+                            if stdout_log:
+                                stdout_log.write(line)
+                            # Print stdout for visibility
+                            print(line, end="")
 
-                        self._capture_metrics(line, metrics)
-                    else:
-                        stdout_lines.append(line.rstrip())
-                        if stdout_log:
-                            stdout_log.write(line)
-                        # Print stdout for visibility
-                        print(line, end="")
+                            # Check for NaN
+                            if self._check_nan(line):
+                                nan_count_out += 1
+                                print(f"\n\u26a0\ufe0f  NaN/Inf detected ({nan_count_out}/{self.nan_patience})",
+                                      file=sys.stderr)
+                                if nan_count_out >= self.nan_patience:
+                                    killed_reason = f"nan_detected ({nan_count_out} consecutive)"
+                                    proc.send_signal(signal.SIGTERM)
+                                    time.sleep(5)
+                                    if proc.poll() is None:
+                                        proc.kill()
+                                    break
+                            else:
+                                nan_count_out = 0  # Reset on clean line
 
-                        # Check for NaN
-                        if self._check_nan(line):
-                            nan_count_out += 1
-                            print(f"\n\u26a0\ufe0f  NaN/Inf detected ({nan_count_out}/{self.nan_patience})",
-                                  file=sys.stderr)
-                            if nan_count_out >= self.nan_patience:
-                                killed_reason = f"nan_detected ({nan_count_out} consecutive)"
-                                proc.send_signal(signal.SIGTERM)
-                                time.sleep(5)
-                                if proc.poll() is None:
-                                    proc.kill()
-                                break
-                        else:
-                            nan_count_out = 0  # Reset on clean line
-
-                        # Capture metrics
-                        self._capture_metrics(line, metrics)
-
-            sel.close()
+                            # Capture metrics
+                            self._capture_metrics(line, metrics)
+            finally:
+                sel.close()
 
             # Drain any remaining buffered output after process exits
             for stream, is_stderr in [(proc.stdout, False), (proc.stderr, True)]:

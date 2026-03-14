@@ -17,6 +17,11 @@ context: |
   would handle brief network blips without blocking the caller for
   too long.
 
+  Implementation contract (the eval tests depend on these):
+    - Store the Redis client as self._redis (tests inject mocks via bus._redis)
+    - Constructor signature: EventBus(redis_url="redis://localhost:6379")
+    - Public method: publish(channel, message)
+
 notes: |
   This is an example ticket for a software engineering task.
   The eval uses pytest (test suite pass/fail) rather than custom metrics.
