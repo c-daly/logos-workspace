@@ -53,20 +53,24 @@ def run_pytest(test_path: str, marker: str = None, verbose: bool = False) -> dic
     passed = 0
     failed = 0
     errors = 0
+    skipped = 0
 
     for line in output.splitlines():
         line = line.strip()
-        if "passed" in line or "failed" in line or "error" in line:
+        if "passed" in line or "failed" in line or "error" in line or "skipped" in line:
             import re
             p = re.search(r'(\d+) passed', line)
             f = re.search(r'(\d+) failed', line)
             e = re.search(r'(\d+) error', line)
+            s = re.search(r'(\d+) skipped', line)
             if p:
                 passed = int(p.group(1))
             if f:
                 failed = int(f.group(1))
             if e:
                 errors = int(e.group(1))
+            if s:
+                skipped = int(s.group(1))
 
     total = passed + failed + errors
     pass_rate = passed / total if total > 0 else 0.0
@@ -75,7 +79,8 @@ def run_pytest(test_path: str, marker: str = None, verbose: bool = False) -> dic
         "tests_passed": passed,
         "tests_failed": failed,
         "tests_errors": errors,
-        "tests_total": total,
+        "tests_skipped": skipped,
+        "tests_total": total + skipped,
         "pass_rate": round(pass_rate, 4),
         "exit_code": result.returncode,
         "output": output,
@@ -103,7 +108,7 @@ def main():
         print()
 
     # Structured output
-    for key in ["tests_passed", "tests_failed", "tests_total", "pass_rate"]:
+    for key in ["tests_passed", "tests_failed", "tests_skipped", "tests_total", "pass_rate"]:
         print(f"[METRIC] {key}={results[key]}")
 
     passed = results["pass_rate"] >= args.threshold

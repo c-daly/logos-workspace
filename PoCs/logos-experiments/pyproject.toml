@@ -32,5 +32,10 @@ harness-metrics = "harness.metrics:main"
 harness-monitor = "harness.monitor:main"
 harness-eval = "harness.pytest_eval:main"
 
+[tool.pytest.ini_options]
+markers = [
+    "jepa: tests specific to the vjepa_clip_alignment experiment",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["harness"]

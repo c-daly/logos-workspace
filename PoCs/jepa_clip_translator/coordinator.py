@@ -290,7 +290,7 @@ def generate_round1_configs() -> list[ExperimentConfig]:
         ExperimentConfig(
             experiment_id="exp_001_transformer",
             architecture=ArchitectureConfig(type="transformer", hidden_dim=512, num_blocks=4, num_heads=8, dropout=0.05),
-            training=TrainingConfig(batch_size=512, max_epochs=300, early_stop_patience=20,
+            training=TrainingConfig(batch_size=256, max_epochs=300, early_stop_patience=20,
                                     lr=5e-4, warmup_epochs=20, cooldown_epochs=40, lr_schedule="cosine"),
             loss=LossConfig(terms=[
                 {"function": "cosine", "target": "clip_image", "weight": 0.7, "temperature": 0.07, "label_smoothing": 0.0},

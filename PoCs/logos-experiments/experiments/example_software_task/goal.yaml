@@ -1,0 +1,26 @@
+objective: |
+  Add retry with exponential backoff to EventBus.publish() for transient
+  Redis errors (ConnectionError, TimeoutError, OSError). After 3 retries
+  (4 total attempts), re-raise. Non-transient errors raise immediately.
+
+target: logos/logos_events/event_bus.py
+
+success_criteria:
+  - metric: test_pass_rate
+    threshold: 1.0
+    primary: true
+    description: All pytest tests in eval/ must pass
+
+eval: eval/
+
+context: |
+  The EventBus (logos_events.event_bus.EventBus) currently fires and
+  forgets. In production, transient Redis disconnects cause silent
+  message loss. A retry with backoff would handle brief network blips
+  without blocking the caller for too long.
+
+notes: |
+  This is an example ticket for a software engineering task.
+  The eval uses pytest (test suite pass/fail) rather than custom metrics.
+  The eval imports the real logos_events.EventBus — the agent must modify
+  the actual module, not create a standalone implementation.

@@ -78,7 +78,7 @@ pod:
       clip_val:  /workspace/vjepa_clip_alignment/workspace/val/clip_val_embeddings.npy
     projector: /workspace/vjepa_clip_alignment/projector_v7.py
     eval_script: /workspace/vjepa_clip_alignment/eval/test_alignment.py
-  ssh: ssh -i ~/.ssh/runpod_vjepa/id_ed25519 -p 13660 root@216.249.100.66
+  ssh: <redacted — see local RunPod config>
 
 local_deliverables:
   paper: workspace/paper.md
