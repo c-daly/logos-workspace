@@ -168,3 +168,34 @@ class TestPushFlag:
         # push_and_pr should not be called — this is a control flow test
         # verified in the main() integration, not here
         pass
+
+
+class TestScaffoldIntegration:
+    def test_new_integration_experiment_has_target(self, tmp_path, monkeypatch):
+        """harness-new --target creates goal.yaml with target field."""
+        from harness import new as new_module
+        from harness.new import create_experiment
+
+        monkeypatch.setattr(new_module, "EXPERIMENTS_DIR", tmp_path)
+
+        create_experiment(
+            name="retry_eventbus",
+            goal="Add retry to EventBus.publish()",
+            target="logos/logos_events/event_bus.py",
+        )
+
+        goal_text = (tmp_path / "retry_eventbus" / "goal.yaml").read_text()
+        assert "target:" in goal_text
+        assert "logos/logos_events/event_bus.py" in goal_text
+
+    def test_new_standalone_no_target(self, tmp_path, monkeypatch):
+        """harness-new without --target creates standard goal.yaml."""
+        from harness import new as new_module
+        from harness.new import create_experiment
+
+        monkeypatch.setattr(new_module, "EXPERIMENTS_DIR", tmp_path)
+
+        create_experiment(name="my_ml_exp", goal="Train a model")
+
+        goal_text = (tmp_path / "my_ml_exp" / "goal.yaml").read_text()
+        assert "target:" not in goal_text

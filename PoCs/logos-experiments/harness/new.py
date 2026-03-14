@@ -45,6 +45,27 @@ eval: eval/evaluate.py
 #   Anything else the agent should know but doesn't need to know.
 """
 
+INTEGRATION_GOAL_TEMPLATE = """# {name}
+
+objective: |
+  {goal}
+
+target: {target}
+
+success_criteria:
+  - metric: test_pass_rate
+    threshold: 1.0
+    primary: true
+
+eval: eval/
+
+# context: |
+#   Why this matters, background info.
+
+# notes: |
+#   Anything else the agent should know.
+"""
+
 
 CONSTRAINTS_TEMPLATE = """\
 # Constraints for: {name}
@@ -202,7 +223,7 @@ if __name__ == "__main__":
 """
 
 
-def create_experiment(name: str, goal: str = "<describe the objective>"):
+def create_experiment(name: str, goal: str = "<describe the objective>", target: str = None):
     exp_dir = EXPERIMENTS_DIR / name
     if exp_dir.exists():
         print(f"❌ Experiment '{name}' already exists at {exp_dir}")
@@ -213,9 +234,14 @@ def create_experiment(name: str, goal: str = "<describe the objective>"):
         (exp_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Write the ticket
-    (exp_dir / "goal.yaml").write_text(
-        GOAL_TEMPLATE.format(name=name, goal=goal)
-    )
+    if target:
+        (exp_dir / "goal.yaml").write_text(
+            INTEGRATION_GOAL_TEMPLATE.format(name=name, goal=goal, target=target)
+        )
+    else:
+        (exp_dir / "goal.yaml").write_text(
+            GOAL_TEMPLATE.format(name=name, goal=goal)
+        )
 
     # Status tracking
     (exp_dir / "status.yaml").write_text(
@@ -243,9 +269,11 @@ def main():
     parser.add_argument("name", help="Experiment name")
     parser.add_argument("--goal", "-g", default="<describe the objective>",
                         help="Objective (can also edit goal.yaml directly)")
+    parser.add_argument("--target", "-t", default=None,
+                        help="Target file for integration experiments (e.g. logos/logos_events/event_bus.py)")
     args = parser.parse_args()
 
-    create_experiment(args.name, args.goal)
+    create_experiment(args.name, args.goal, target=args.target)
 
 
 if __name__ == "__main__":
