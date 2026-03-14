@@ -146,7 +146,7 @@ def _call_llm(results: list[dict], num_configs: int, llm_config: LLMConfig, llm_
     elif llm_config.provider == "anthropic":
         text = _call_anthropic(llm_config.model, prompt)
     else:
-        print(f"  Unknown provider: {llm_config.provider!r} (supported: openai, anthropic)")
+        logger.warning("  Unknown provider: %r (supported: openai, anthropic)", llm_config.provider)
         return [], None
 
     if text is None:
@@ -159,7 +159,7 @@ def _call_openai(model: str, prompt: str) -> str | None:
     try:
         from openai import OpenAI, AuthenticationError, APIError
     except ImportError:
-        print("  openai package not installed — run: pip install openai")
+        logger.warning("  openai package not installed — run: pip install openai")
         return None
 
     try:
@@ -173,13 +173,13 @@ def _call_openai(model: str, prompt: str) -> str | None:
         )
         return response.choices[0].message.content
     except AuthenticationError:
-        print("  OpenAI auth error — check OPENAI_API_KEY")
+        logger.warning("  OpenAI auth error — check OPENAI_API_KEY")
         return None
     except APIError as e:
-        print(f"  OpenAI API error: {e}")
+        logger.warning("  OpenAI API error: %s", e)
         return None
     except Exception as e:
-        print(f"  OpenAI call failed: {e}")
+        logger.warning("  OpenAI call failed: %s", e)
         return None
 
 
@@ -187,7 +187,7 @@ def _call_anthropic(model: str, prompt: str) -> str | None:
     try:
         import anthropic
     except ImportError:
-        print("  anthropic package not installed — run: pip install anthropic")
+        logger.warning("  anthropic package not installed — run: pip install anthropic")
         return None
 
     try:
@@ -200,13 +200,13 @@ def _call_anthropic(model: str, prompt: str) -> str | None:
         ) as stream:
             return stream.get_final_message().content[0].text
     except anthropic.AuthenticationError:
-        print("  Anthropic auth error — check ANTHROPIC_API_KEY")
+        logger.warning("  Anthropic auth error — check ANTHROPIC_API_KEY")
         return None
     except anthropic.APIError as e:
-        print(f"  Anthropic API error: {e}")
+        logger.warning("  Anthropic API error: %s", e)
         return None
     except Exception as e:
-        print(f"  Anthropic call failed: {e}")
+        logger.warning("  Anthropic call failed: %s", e)
         return None
 
 
@@ -262,13 +262,13 @@ def _parse_configs(text: str, llm_log_path: str | None = None) -> tuple[list[Exp
             json_str = m.group()
 
     if not json_str:
-        print("  Could not extract JSON from LLM response.")
+        logger.warning("  Could not extract JSON from LLM response.")
         return [], recommended_target
 
     try:
         configs_json = json.loads(json_str)
     except json.JSONDecodeError as e:
-        print(f"  JSON parse error: {e}")
+        logger.warning("  JSON parse error: %s", e)
         return [], recommended_target
 
     configs = []
@@ -400,7 +400,7 @@ def generate_next_configs_random(
         d["experiment_id"] = f"exp_{uuid.uuid4().hex[:8]}"
         configs.append(ExperimentConfig.from_dict(d))
 
-    print(f"  Random mutator proposed {len(configs)} configs from: {best['experiment_id']}")
+    logger.info("  Random mutator proposed %d configs from: %s", len(configs), best["experiment_id"])
     return configs
 
 
@@ -423,7 +423,7 @@ def generate_next_configs(
         llm_config = LLMConfig()
     configs, recommended_target = _call_llm(all_results, num_configs, llm_config, llm_log_path=llm_log_path)
     if configs:
-        print(f"  LLM ({llm_config}) proposed {len(configs)} configs.")
+        logger.info("  LLM (%s) proposed %d configs.", llm_config, len(configs))
         return configs, recommended_target
-    print("  LLM unavailable, falling back to random mutation.")
+    logger.warning("  LLM unavailable, falling back to random mutation.")
     return generate_next_configs_random(all_results, num_configs), None

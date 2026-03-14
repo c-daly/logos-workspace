@@ -106,7 +106,7 @@ def evaluate_checkpoint(
     # 2. Load model from checkpoint.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_translator(cfg.architecture, cfg.vjepa_dim, cfg.clip_dim).to(device)
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
     state = ckpt.get("model_state_dict", ckpt.get("best_state", ckpt))
     model.load_state_dict({k: v.to(device) for k, v in state.items()})
     model.eval()

@@ -456,17 +456,16 @@ def run_search(
         )
         logger.info("  Running %d experiments this round.", len(configs))
 
-        round_best = float("inf")
         round_best_cos = 0.0
         round_best_metric = 0.0
         for cfg in configs:
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
             _save_log(all_results, output_path)
-            if result["val_loss"] < round_best:
-                round_best = result["val_loss"]
+            if result["val_cosine_sim"] > round_best_cos:
                 round_best_cos = result["val_cosine_sim"]
-            round_best_metric = max(round_best_metric, result.get(target_metric, 0.0))
+            metric_key = target_metric or "val_cosine_sim"
+            round_best_metric = max(round_best_metric, result.get(metric_key, 0.0))
 
         # Round summary
         logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
@@ -482,9 +481,9 @@ def run_search(
 
         if round_best_metric > best_metric_val:
             best_metric_val = round_best_metric
-            best_val_loss = round_best
             rounds_without_improvement = 0
-            overall_best = max(all_results, key=lambda r: r.get(target_metric, 0.0))
+            metric_key = target_metric or "val_cosine_sim"
+            overall_best = max(all_results, key=lambda r: r.get(metric_key, 0.0))
             logger.info(
                 "  New best: %s=%.4f (cos=%.4f) -- %s",
                 target_metric, best_metric_val, overall_best["val_cosine_sim"], overall_best["experiment_id"],
@@ -494,9 +493,10 @@ def run_search(
             patience_str = f"{rounds_without_improvement}/{convergence_patience}" if convergence_patience else str(rounds_without_improvement)
             logger.info("  No improvement (patience %s).", patience_str)
 
+        effective_target = target_metric or "val_cosine_sim"
         should_stop, stop_reason = _check_stopping(
             all_results, round_num, max_rounds,
-            max_experiments, target_metric, target_value,
+            max_experiments, effective_target, target_value,
             convergence_patience, rounds_without_improvement,
         )
         if should_stop:
@@ -505,8 +505,9 @@ def run_search(
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
-    best_result = max(all_results, key=lambda r: r.get(target_metric, 0.0))
-    for rank, r in enumerate(sorted(all_results, key=lambda r: -r["val_cosine_sim"]), 1):
+    metric_key = target_metric or "val_cosine_sim"
+    best_result = max(all_results, key=lambda r: r.get(metric_key, 0.0))
+    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get(metric_key, 0.0)), 1):
         arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
         logger.info(

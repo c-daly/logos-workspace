@@ -329,7 +329,7 @@ def generate_next_configs_random(
 ) -> list[ExperimentConfig]:
     """Mutate the best config to produce variants."""
     rng = random.Random(seed)
-    best = min(all_results, key=lambda r: r["val_loss"])
+    best = max(all_results, key=lambda r: r.get("val_cosine_sim", 0.0))
     base = json.loads(json.dumps(best["config"]))
 
     configs = []

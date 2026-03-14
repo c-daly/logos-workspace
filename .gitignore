@@ -42,6 +42,9 @@ PoCs/**/tiny_mind.json
 
 *.h5
 *logs.json
+*.log
+run_logs/
+PoCs/vl_jepa/logs/
 # Python
 __pycache__/
 *.pyc
