@@ -1,86 +1,49 @@
 # LOGOS Project Status
 
-**Generated:** 2026-03-04
+**Generated:** 2026-03-14
 **Foundry Version:** v0.7.0 (all repos at v0.7.0)
 
 ---
 
-## Recent Work (since last status: Mar 2)
+## Recent Work (since last status: Mar 4)
 
-This session was one of the most productive in recent project history. Five workstreams executed in parallel, landing ~25 PRs across all six repositories.
+The past 10 days shifted from infrastructure blitz to research and design. No service-repo code changes landed — all energy went into the V-JEPA translator PoC and design documentation for upcoming cognitive loop work.
 
-### 1. KG Maintenance Infrastructure (Mar 3-4)
+### 1. V-JEPA Token-Grid PoC (Mar 5-13)
 
-The KG Maintenance epic (#499) saw major progress with foundational infrastructure landing:
+Major research effort in logos-workspace. End-to-end PoC for translating V-JEPA temporal token embeddings into CLIP space, with an autonomous LLM-guided hyperparameter search system.
 
-- **logos #512** (merged): Centralized Redis & pub/sub infrastructure -- `logos_events` package with `EventBus`, `RedisConfig` from `logos_config`.
-- **logos #514** (merged): Add `get_all_type_definitions()` to HCGClient.
-- **sophia #134** (merged): Use centralized RedisConfig from logos_config.
-- **sophia #136** (merged): Ontology pub/sub distribution (sophia side).
-- **sophia #137** (merged): Maintenance scheduler with configurable triggers.
-- **hermes #93** (merged): Use centralized RedisConfig from logos_config.
-- **hermes #95** (merged): Add TypeRegistry for live ontology type sync.
-- **hermes #99** (merged): Standardize infrastructure ports to match logos_config.
-- **sophia #133, hermes #92** (merged): Bump logos-foundry to v0.7.0.
+- **logos-workspace PR #4** (OPEN): V-JEPA token-grid PoC with autonomous hyperparameter search
+- Token-level V-JEPA embeddings `(B, 32, 1024)` — 32 temporal tokens per video, no mean-pooling
+- Translator architectures tested: linear, MLP, residual, transformer, multi-stage pipelines
+- Loss functions: MSE, cosine, InfoNCE (false-negative masked), mixed targets
+- Autonomous search via `coordinator.py` using gpt-5.4 for LLM-guided config generation
+- **Best result:** `txt_R@1 = 0.371` (target: 0.42), `img_R@5 = 0.944`
+- 80+ experiments across 15+ rounds on MSR-VTT
+- Key finding: InfoNCE is the viable retrieval loss; vanilla contrastive causes training collapse
 
-**Closed issues:**
-- logos #500: Centralized Redis & Pub/Sub Infrastructure -- DONE
-- sophia #135: Use centralized RedisConfig -- DONE
-- hermes #94: Use centralized RedisConfig -- DONE
+This directly informs the universal embedding layer design and unblocks decisions about JEPA-to-CLIP translation feasibility.
 
-### 2. CI Discipline & Ticket Management (Mar 4)
+### 2. Design Documentation (Mar 5-10)
 
-Rolled out CI discipline tooling (branch naming checks, issue linkage enforcement) across all repos:
+Three design documents landed in the workspace:
 
-- **logos #513** (merged): CI discipline tooling
-- **sophia #138** (merged): CI discipline tooling
-- **talos #56** (merged): CI discipline tooling
-- **apollo #162** (merged): CI discipline tooling
-- **hermes #96** (merged): CI discipline tooling (also included ci/v2 pin)
+- **Ontology evolution design** (logos-workspace PR #3, merged Mar 5): Design for emergent type discovery in the knowledge graph
+- **Entity resolution design** (`docs/plans/2026-03-06-entity-resolution-design.md`): Non-linguistic alias detection via cosine triage + hypothesis accumulation
+- **Entity resolution implementation plan** (`docs/plans/2026-03-06-entity-resolution-plan.md`): 7 TDD tasks spanning hermes and sophia, ready to execute
+- **Universal embedding layer design** (`docs/plans/2026-03-06-universal-embedding-layer-design.md`): Multi-head autoencoder architecture — JEPA/CLIP/text input heads, shared trunk whose internal representation IS the universal space
 
-### 3. CI Version Pinning to ci/v2 (Mar 4)
+### 3. No Service-Repo Changes
 
-Pinned reusable CI workflows to the `ci/v2` tag across all repos:
-
-- **sophia #140** (merged): Pin publish.yml to ci/v2
-- **talos #58** (merged): Pin publish.yml to ci/v2
-- **apollo #164** (merged): Pin publish.yml to ci/v2
-- **hermes #96** (merged): Included in CI discipline PR
-- **logos #517** (OPEN): Pin reusable workflows to ci/v2 -- CI mostly passing, `standard / Python lint & tests (3.12)` still running
-
-### 4. CLAUDE.md Consolidation (Mar 4)
-
-Replaced AGENTS.md with enriched CLAUDE.md across all repos, providing better agent onboarding:
-
-- **logos #516** (merged): Consolidate AGENTS.md into CLAUDE.md
-- **logos-workspace #1** (merged): Consolidate workspace CLAUDE.md
-- **sophia #139** (merged): Consolidate AGENTS.md into CLAUDE.md
-- **talos #57** (merged): Consolidate AGENTS.md into CLAUDE.md
-- **hermes #97** (merged): Consolidate AGENTS.md into CLAUDE.md
-- **apollo #163** (merged): Consolidate AGENTS.md into CLAUDE.md
-
-### 5. Documentation Cleanup (Mar 4)
-
-Major documentation debt reduction:
-
-- **logos #518** (merged): Remove 13 ecosystem-wide doc duplicates that now live in workspace
-- **logos #519** (merged): Add Redis and logos_events to SPEC.md
-- **sophia #141** (merged): Fix factual errors in README
-- **hermes #98** (merged): Fix factual errors in README
-- **hermes #99** (merged): Standardize infrastructure ports to match logos_config
-- **logos-workspace #2** (OPEN): Update ecosystem docs with Redis, sync COGNITIVE_LOOP.md
+logos, sophia, hermes, talos, and apollo have had no new commits or merged PRs since the March 4 infrastructure blitz. The previous session's ~25 PRs are fully settled.
 
 ---
 
 ## In Flight
 
-| PR | Repo | Title | CI Status | Notes |
-|----|------|-------|-----------|-------|
-| #517 | logos | Pin reusable workflows to ci/v2 | 11/12 pass, Python lint still running | Needs review after CI completes |
-| #2 | logos-workspace | Update ecosystem docs: add Redis, sync COGNITIVE_LOOP.md | Greptile passed | Ready for review |
-
-**Attention needed:**
-- logos #517: The `standard / Python lint & tests (3.12)` check has been running for an extended time. May need investigation if it does not complete. All other checks (milestone gates M1-M3, end-to-end demo, branch naming, issue linkage, SDK protection, Greptile) are passing.
+| PR | Repo | Title | Status | Notes |
+|----|------|-------|--------|-------|
+| #4 | logos-workspace | V-JEPA token-grid PoC with autonomous hyperparameter search | OPEN | 105k additions; research PoC, not production code |
 
 ---
 
@@ -105,23 +68,25 @@ Major documentation debt reduction:
 | logos-workspace | 0 |
 | **Total** | **50** |
 
-### logos -- notable open issues by area
+No issues opened or closed since March 4.
+
+### logos — notable open issues by area
 
 **KG Maintenance epic (#499, status:in-progress, priority:high):**
-- #501: Ontology Pub/Sub Distribution (priority:high) -- infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
-- #503: Entity Resolution -- Alias Detection and Merging (priority:high)
-- #504: Type Correction -- Centroid-Based Reclassification (priority:medium)
-- #505: Ontology Evolution -- Emergent Type Discovery (priority:medium)
-- #506: Relationship Inference -- Taxonomic Scaffolding and Missing Edges (priority:medium)
+- #501: Ontology Pub/Sub Distribution (priority:high) — infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
+- #503: Entity Resolution — Alias Detection and Merging (priority:high) — design + implementation plan ready, not yet started
+- #504: Type Correction — Centroid-Based Reclassification (priority:medium)
+- #505: Ontology Evolution — Emergent Type Discovery (priority:medium) — design doc landed
+- #506: Relationship Inference — Taxonomic Scaffolding and Missing Edges (priority:medium)
 - #507: Competing Edges & Confidence Model (priority:medium)
-- #508: Maintenance Scheduler -- When and How Jobs Run (priority:medium) -- scheduler framework landed in sophia #137
+- #508: Maintenance Scheduler — When and How Jobs Run (priority:medium) — scheduler framework landed in sophia #137
 
 **Learning & Memory epic (#415, priority:high):**
 - #411: Hierarchical Memory Infrastructure (priority:high)
 - #412: Event-driven Reflection System (priority:high)
 - #413: Selective Diary Entry Creation (priority:medium)
 - #414: Episodic Memory & Learning (priority:high)
-- #416: Testing Sanity -- prerequisite to learning & memory work (priority:critical)
+- #416: Testing Sanity — prerequisite to learning & memory work (priority:critical)
 
 **Flexible Ontology cleanup (#458-465):**
 - #458: Update ontology with lessons learned from TinyMind (priority:medium)
@@ -136,104 +101,101 @@ Major documentation debt reduction:
 - #321: Cross-service coverage gaps
 - #335, #338, #341: Endpoint-level OTel spans (Sophia, Hermes, Apollo)
 - #339, #342: OTel testing & documentation (Hermes, Apollo)
-- #340: Apollo OTel SDK integration (priority:critical)
+- #340: Apollo OTel SDK integration (priority:critical) — may be partially addressed by merged PR #156
 
 **Infrastructure & Other:**
 - #515: Migrate type_definition nodes from fabricated type_* IDs to real UUIDs
 - #498: PM agent: detect undocumented new functionality during status updates
 - #496: Consolidate CWM modules into HCG ontology types (priority:high)
 - #481: Centralize test data seeder script
-- #469: Centralize Redis infrastructure -- largely done via #500/#512, may need closure review
+- #469: Centralize Redis infrastructure — largely done via #500/#512, candidate for closure
 - #447: Documentation consolidation (priority:medium)
 - #433: Standardize LOGOS repos
 - #420: Standardize testing infrastructure
+- #416: Testing Sanity (priority:critical)
 - #409: Standardize developer scripts
 - #403: Deprecate planner_stub in favor of HCGPlanner
 - #311: Apollo authentication and authorization (priority:high, deferred per non-goals)
 - #317: Advanced graph layouts (priority:low)
 - #267, #264, #265, #246: Persona diary features (priority:medium)
 - #135: Developer onboarding guide (priority:medium)
-- #91: OpenAPI validation tests (priority:high, assigned to Copilot)
+- #91: OpenAPI validation tests (priority:high)
 
-### sophia -- open issues (3)
+### sophia — open issues (3)
 - #101: Define session boundaries and ephemeral node lifecycle (priority:medium)
-- #76: Implement JEPA PoC backend -- **stale since Dec 6, 2025** (90+ days)
+- #76: Implement JEPA PoC backend — **98+ days stale as an issue**, but related V-JEPA research is actively happening in logos-workspace
 - #20: Extend HCG + Executor to support general tool actions (priority:medium)
 
-### talos -- open issues (1)
+### talos — open issues (1)
 - #31: Add coverage reporting and audit skip conditions
 
 ---
 
 ## Progress Against Vision Goals
 
-### 1. Complete the cognitive loop -- STRONG PROGRESS
-The end-to-end loop is functional and this session significantly strengthened the infrastructure beneath it. Centralized Redis & pub/sub (#512) provides the event backbone. Ontology pub/sub distribution (sophia #136, hermes #95) enables live type sync between services. The maintenance scheduler (sophia #137) gives Sophia autonomous graph-reasoning agency. Combined with the prior NER+RE improvements (hermes #88, #90), batched proposal processing (sophia #131), and embedding-based type classification (sophia #129), the loop is becoming increasingly autonomous. **Next frontier:** entity resolution (#503), completing pub/sub distribution (#501), feedback processing.
+### 1. Complete the cognitive loop — INFRASTRUCTURE READY, NEXT STORIES DESIGNED
 
-### 2. Grounded perception via JEPA -- STALE
-Sophia #76 (JEPA PoC backend) has had no activity since Dec 6, 2025 (90+ days). No recent work on CWM-G or perception. This remains the project's differentiating capability but has not been prioritized. **Needs a conscious decision: reactivate or explicitly defer.**
+The infrastructure phase completed March 4 (Redis event bus, ontology pub/sub, maintenance scheduler). Since then, the focus shifted to designing the next layer of cognitive loop work. Entity resolution (#503) has both a design doc and a 7-task TDD implementation plan ready to execute. Ontology evolution (#505) has a design doc. No implementation code has landed in the 10 days since — the service repos are waiting for these designs to be picked up.
 
-### 3. Flexible ontology -- ACTIVE
-The reified edge model is implemented (logos #490). Ontology hierarchy restructure (logos #510) merged. Several downstream cleanup issues remain (#458-465), with #464 and #463 blocked on #460/#461. Type_definition node migration (#515) is a new cleanup item. **Steady progress; downstream repo updates are the next step.**
+**Ready to execute:** Entity resolution (#503)
+**Designed but not planned:** Ontology evolution (#505)
+**Still needs design:** Feedback processing, type correction (#504), relationship inference (#506)
 
-### 4. Memory and learning -- NOT STARTED
-Epic #415 and its stories (#411-414) exist but no implementation work has begun. Testing prerequisites (#416, priority:critical) remain open. CWM unification (#496) is a logical precursor. The centralized Redis/event infrastructure landed this session creates a foundation that memory work will build on.
+### 2. Grounded perception via JEPA — REACTIVATED VIA RESEARCH
 
-### 5. CWM unification -- NOT STARTED
-Issue #496 is filed. The maintenance scheduler and pub/sub work demonstrate increasing graph-awareness in Sophia, which is related but not direct unification work. No dedicated effort yet.
+The V-JEPA token-grid PoC (logos-workspace PR #4) represents significant research investment. 80+ experiments translating V-JEPA temporal tokens into CLIP space, with autonomous LLM-guided hyperparameter search. Best txt_R@1 = 0.371 against a 0.42 target — close but not yet there. This directly validates (or will invalidate) the JEPA-to-CLIP translation approach that underpins the universal embedding layer design.
 
-### 6. Planning and execution -- PAUSED
-Planner stub deprecation (#403) is open. No recent planner work. Sophia #20 (general tool actions) would expand executor capabilities. **Blocked on ontology maturity.**
+sophia #76 (JEPA PoC backend) is 98+ days stale as a GitHub issue, but the active research in the workspace is the real continuation of this work. **Recommend updating #76 to reference the workspace PoC results once the PR is merged.**
 
-### 7. Embodiment via Talos -- PAUSED
-Last active Talos work was CI discipline (#56) and CLAUDE.md consolidation (#57) this session. Coverage reporting (#31) is the only open issue. Simulation scaffold exists but no active development.
+### 3. Flexible ontology — STALLED
 
-### 8. Observability -- PARTIAL
-OTel instrumentation exists across services. Gap issues remain: Apollo SDK integration (#340 -- critical priority), endpoint spans (#335, #338, #341), testing (#339, #342), cross-service coverage (#321). Apollo already has OTel (merged Feb 16, PR #156), so #340 may be partially addressed -- worth a triage pass.
+No new work since ontology hierarchy restructure (#510) merged March 2. Downstream cleanup issues (#458-465) remain open. #464 and #463 are still blocked on #460/#461. Type_definition UUID migration (#515) untouched. The reified model is implemented but downstream propagation has stalled for 12 days.
 
-### 9. Documentation -- SIGNIFICANT PROGRESS THIS SESSION
-Major cleanup this session: 13 duplicate ecosystem docs removed from logos (PR #518), SPEC.md updated with Redis/logos_events (#519), READMEs fixed in sophia (#141) and hermes (#98), CLAUDE.md consolidated across all 6 repos, and ecosystem docs update in progress (workspace #2). Documentation is no longer "paused" -- it received meaningful attention. Remaining: onboarding guide (#135), proposed doc execution (#447).
+### 4. Memory and learning — NOT STARTED
 
-### 10. Testing and infrastructure -- SIGNIFICANT PROGRESS THIS SESSION
-CI discipline tooling landed across all 5 service repos (branch naming checks, issue linkage enforcement). CI version pinning to ci/v2 completed in 4 repos with logos #517 pending. Port standardization completed for hermes (#99). Infrastructure is meaningfully more disciplined than 48 hours ago. Remaining: coverage improvement, OpenAPI contract tests (#91), test data seeder (#481).
+No change. Epic #415 and stories (#411-414) still waiting. Testing sanity (#416, priority:critical) remains the prerequisite. The Redis/event infrastructure that landed March 4 provides the foundation, but no implementation work has begun.
+
+### 5. Planning and execution — PAUSED
+
+No change. Planner stub deprecation (#403) still open. Still blocked on flexible ontology downstream updates (#460).
+
+### 6. Embodiment via Talos — PAUSED
+
+No change. Correctly deprioritized.
+
+### 7. Infrastructure and observability — STABLE
+
+No new infrastructure work since March 4. The CI discipline tooling, version pinning, and Redis infrastructure from that session remain the current state. OTel gaps (#335, #338, #340, #341) still open.
+
+### 8. Documentation and testing — DESIGN DOCS ACTIVE
+
+Three design docs landed in the workspace (entity resolution, universal embedding layer, ontology evolution). Service-level documentation unchanged. Testing gaps (#416, #420, #91) still open.
 
 ---
 
 ## Stale / Drift
 
 **Stale issues (>30 days no activity):**
-- sophia #76: JEPA PoC backend (last activity: Dec 6, 2025) -- 90+ days stale
+- sophia #76: JEPA PoC backend (last issue activity: Dec 6, 2025) — 98+ days stale, but related research is active in workspace
 
 **Potential closures:**
-- logos #469 (Centralize Redis infrastructure): The core work was done in logos #500/#512. Review whether remaining scope justifies keeping this open or if it can be closed.
+- logos #469 (Centralize Redis infrastructure): Core work done in logos #500/#512. Review whether remaining scope justifies keeping open.
 - logos #501 (Ontology Pub/Sub Distribution): Significant implementation landed (sophia #136, hermes #95). Review remaining scope.
 - logos #508 (Maintenance Scheduler): Core scheduler framework landed in sophia #137. Review remaining scope.
+- logos #340 (Apollo OTel SDK): Apollo OTel already merged (PR #156, Feb 16). Triage whether this is actually done.
 
-**PR hygiene:**
-- This session's PRs generally include proper `Closes #N` references -- a significant improvement over the prior pattern flagged in the last status report.
+**Reconciliation flags:**
+- Many merged PRs from the March 4 blitz lack linked issues (infrastructure/docs PRs). This is expected for that type of work but noted for the record.
+- logos #499 (KG Maintenance epic) is labeled `status:in-progress` but has no open PR. Correct status — it's an epic with active sub-stories.
 
 ---
 
-## Session Summary
+## Observations
 
-**By the numbers:**
-- ~25 PRs merged across 6 repos in a single session
-- 3 issues closed (logos #500, sophia #135, hermes #94)
-- 2 PRs still open (logos #517, logos-workspace #2)
-- 5 concurrent workstreams executed
+**The project is in a design-then-build transition.** The March 4 infrastructure blitz created the foundation. The past 10 days produced design docs and research results. The service repos are now waiting for implementation work to resume.
 
-**What changed:**
-- All repos now have CI discipline tooling (branch naming + issue linkage checks)
-- All repos now have enriched CLAUDE.md (replacing AGENTS.md)
-- 4/5 repos pinned to ci/v2 (logos #517 pending)
-- Centralized Redis/pub/sub infrastructure in place
-- Ontology pub/sub distribution connecting Sophia and Hermes
-- Maintenance scheduler giving Sophia autonomous graph-reasoning triggers
-- 13 duplicate docs removed, READMEs corrected, SPEC.md updated
-- Hermes ports standardized to match logos_config
+**The V-JEPA PoC is the most significant recent development.** It's the first serious attempt to validate the JEPA-to-CLIP translation that the universal embedding layer depends on. The results (0.371 vs 0.42 target) suggest the approach is viable but needs refinement.
 
-**What still needs attention:**
-1. **logos #517** -- Python lint check still running; merge once CI clears
-2. **logos-workspace #2** -- ecosystem docs update ready for review
-3. **logos #469, #501, #508** -- triage for potential closure given recent work
-4. **sophia #76 (JEPA)** -- 90+ days stale; needs a decision
+**Entity resolution (#503) is the most ready-to-execute story.** Full design + 7-task TDD implementation plan. This is the natural next pick for coding work.
+
+**Three issues may be closeable** (#469, #501, #508) — their core work has landed but the issues haven't been formally closed.
