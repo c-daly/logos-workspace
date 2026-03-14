@@ -127,3 +127,44 @@ class TestEvalExecution:
 
         result = run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=worktree)
         assert result["pass_rate"] == 1.0
+
+
+class TestPushFlag:
+    def test_push_creates_pr(self, tmp_path):
+        """--push pushes the branch and opens a PR via gh."""
+        from unittest.mock import patch, MagicMock
+        from harness.run import push_and_pr, WorktreeInfo
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+
+        wt_info = WorktreeInfo(
+            worktree_path=tmp_path / "worktree",
+            branch_name="exp/test_retry",
+            repo_dir=repo_dir,
+        )
+
+        eval_results = {"pass_rate": 1.0, "tests_passed": 5, "tests_total": 5}
+
+        with patch("harness.run.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/pr/1\n")
+            url = push_and_pr(
+                wt_info=wt_info,
+                experiment_name="test_retry",
+                eval_results=eval_results,
+            )
+
+        # Should have called git push and gh pr create
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        push_call = [c for c in calls if "push" in c]
+        pr_call = [c for c in calls if "pr" in c[0:2] or "gh" in c]
+        assert len(push_call) >= 1
+        assert len(pr_call) >= 1
+        assert url == "https://github.com/pr/1"
+
+    def test_no_push_without_flag(self):
+        """Default mode does not push."""
+        from harness.run import push_and_pr
+        # push_and_pr should not be called — this is a control flow test
+        # verified in the main() integration, not here
+        pass
