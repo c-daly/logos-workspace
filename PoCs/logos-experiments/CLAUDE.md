@@ -22,7 +22,11 @@ Check `experiments/<name>/journal/` for entries from prior attempts. Each entry 
 
 ### 3. Work
 
-Use `experiments/<name>/workspace/` for your code, models, artifacts. The ticket tells you *what* — you decide *how*.
+**Standalone experiments** (no `target:` in goal.yaml): Use `experiments/<name>/workspace/` for your code, models, artifacts.
+
+**Integration experiments** (`target:` in goal.yaml): The harness creates a git worktree on the target repo. You work in the worktree — modifying the real codebase, not a sandbox copy. The eval imports and tests the real module.
+
+The ticket tells you *what* — you decide *how*.
 
 ### 4. Eval
 
@@ -67,6 +71,8 @@ For complex experiments, use agent teams to parallelize independent sub-tasks. T
 | `harness-journal <experiment> summary` | View attempt history |
 | `harness-metrics <experiment>` | Show metric trends |
 | `harness-monitor -- <cmd>` | Run a subprocess with NaN/timeout/OOM detection |
+| `harness-run <experiment>` | Run experiment (creates worktree for integration) |
+| `harness-run <experiment> --push` | Run + push branch + open PR |
 
 ## Directory Structure
 
