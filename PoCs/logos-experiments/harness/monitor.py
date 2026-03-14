@@ -87,6 +87,7 @@ class TrainingMonitor:
         start_time = time.time()
         nan_count_out = 0
         nan_count_err = 0
+        nan_ever_seen = False
         killed_reason = None
         metrics = {}
         stdout_lines = []
@@ -146,6 +147,7 @@ class TrainingMonitor:
                             # Check stderr for NaN too (e.g. tqdm, logging)
                             if self._check_nan(line):
                                 nan_count_err += 1
+                                nan_ever_seen = True
                                 print(f"\n\u26a0\ufe0f  NaN/Inf detected in stderr ({nan_count_err}/{self.nan_patience})",
                                       file=sys.stderr)
                                 if nan_count_err >= self.nan_patience:
@@ -169,6 +171,7 @@ class TrainingMonitor:
                             # Check for NaN
                             if self._check_nan(line):
                                 nan_count_out += 1
+                                nan_ever_seen = True
                                 print(f"\n\u26a0\ufe0f  NaN/Inf detected ({nan_count_out}/{self.nan_patience})",
                                       file=sys.stderr)
                                 if nan_count_out >= self.nan_patience:
@@ -198,6 +201,7 @@ class TrainingMonitor:
                         print(line, end="", file=sys.stderr)
                         if self._check_nan(line):
                             nan_count_err += 1
+                            nan_ever_seen = True
                             if nan_count_err >= self.nan_patience and killed_reason is None:
                                 killed_reason = f"nan_detected ({nan_count_err} consecutive, stderr)"
                         else:
@@ -210,6 +214,7 @@ class TrainingMonitor:
                         print(line, end="")
                         if self._check_nan(line):
                             nan_count_out += 1
+                            nan_ever_seen = True
                             if nan_count_out >= self.nan_patience and killed_reason is None:
                                 killed_reason = f"nan_detected ({nan_count_out} consecutive)"
                         else:
@@ -224,7 +229,7 @@ class TrainingMonitor:
                 exit_code=exit_code,
                 duration_seconds=duration,
                 killed_reason=killed_reason,
-                nan_detected=(nan_count_out > 0 or nan_count_err > 0),
+                nan_detected=nan_ever_seen,
                 metrics_captured=metrics,
                 stdout_tail="\n".join(stdout_lines[-self.tail_lines:]),
                 stderr_tail="\n".join(stderr_lines[-self.tail_lines:]),
