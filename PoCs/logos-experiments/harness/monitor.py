@@ -94,13 +94,13 @@ class TrainingMonitor:
         # Set up log files if log_dir specified
         stdout_log = None
         stderr_log = None
-        if self.log_dir:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            stdout_log = open(self.log_dir / f"stdout_{timestamp}.log", "w")
-            stderr_log = open(self.log_dir / f"stderr_{timestamp}.log", "w")
 
         try:
+            if self.log_dir:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                stdout_log = open(self.log_dir / f"stdout_{timestamp}.log", "w")
+                stderr_log = open(self.log_dir / f"stderr_{timestamp}.log", "w")
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
