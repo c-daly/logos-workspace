@@ -341,6 +341,7 @@ class TestPytestEvalParsing:
 # Eval: describe_npy
 # ============================================================================
 
+@pytest.mark.jepa
 class TestDescribeNpy:
     def _import_eval(self):
         import importlib.util
