@@ -26,3 +26,7 @@ status experiment:
 # Run a command with NaN/timeout monitoring
 monitor command timeout="4":
     python -m harness.monitor --timeout {{timeout}} -- {{command}}
+
+# Run an experiment (creates worktree for integration)
+run experiment *flags="":
+    python -m harness.run {{experiment}} {{flags}}

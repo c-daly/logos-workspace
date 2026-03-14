@@ -31,6 +31,7 @@ harness-journal = "harness.journal:main"
 harness-metrics = "harness.metrics:main"
 harness-monitor = "harness.monitor:main"
 harness-eval = "harness.pytest_eval:main"
+harness-run = "harness.run:main"
 
 [tool.pytest.ini_options]
 markers = [

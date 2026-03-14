@@ -15,7 +15,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import NamedTuple, Optional
 
-from harness import find_experiments_dir
+from harness import find_experiments_dir, find_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -192,3 +192,87 @@ def push_and_pr(
     url = result.stdout.strip()
     logger.info("Created PR: %s", url)
     return url
+
+
+def resolve_target_repo(target: str, workspace_root: Path) -> Path:
+    """Resolve a target path to the repo it lives in.
+
+    target is like "logos/logos_events/event_bus.py".
+    The first path component is the repo directory name.
+    """
+    parts = Path(target).parts
+    if not parts:
+        raise ValueError(f"Invalid target: {target}")
+    repo_name = parts[0]
+    repo_dir = workspace_root / repo_name
+    if not (repo_dir / ".git").exists():
+        raise FileNotFoundError(
+            f"Target repo not found: {repo_dir} (from target '{target}'). "
+            f"Expected a git repo at {repo_dir}."
+        )
+    return repo_dir
+
+
+def main():
+    """CLI entry point: harness-run <experiment> [--push]"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run an experiment")
+    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--push", action="store_true",
+                        help="Push branch and open PR when done")
+    args = parser.parse_args()
+
+    experiments_dir = find_experiments_dir()
+    exp_dir = experiments_dir / args.experiment
+    if not exp_dir.exists():
+        print(f"Experiment not found: {exp_dir}")
+        sys.exit(1)
+
+    goal = load_goal(exp_dir)
+    print(f"Experiment: {args.experiment}")
+    print(f"Type: {'integration' if goal.is_integration else 'standalone'}")
+    print(f"Objective: {goal.objective.strip()[:80]}")
+    print()
+
+    # Set up worktree for integration experiments
+    wt_info = None
+    if goal.is_integration:
+        workspace_root = find_project_root().parent  # logos-experiments -> LOGOS
+        repo_dir = resolve_target_repo(goal.target, workspace_root)
+        wt_info = setup_worktree(repo_dir=repo_dir, experiment_name=args.experiment)
+        print(f"Worktree: {wt_info.worktree_path}")
+        print(f"Branch: {wt_info.branch_name}")
+        print(f"Target: {goal.target}")
+    else:
+        print(f"Workspace: {exp_dir / 'workspace'}")
+
+    print()
+    print("=" * 60)
+    print("Agent: implement the objective, then signal ready for eval.")
+    print("=" * 60)
+    print()
+
+    # TODO: Team dispatch goes here — for now, just run eval
+    print("Running eval...")
+    worktree_path = wt_info.worktree_path if wt_info else None
+    results = run_eval(goal.eval, exp_dir, worktree_path)
+
+    for key in ["tests_passed", "tests_failed", "tests_skipped", "tests_total", "pass_rate"]:
+        print(f"[METRIC] {key}={results[key]}")
+
+    passed = results["pass_rate"] >= 1.0
+    print(f"\n[EVAL] {'PASS' if passed else 'FAIL'}")
+
+    if args.push and wt_info:
+        if passed:
+            url = push_and_pr(wt_info, args.experiment, results)
+            print(f"\nPR created: {url}")
+        else:
+            print("\nEval failed — not pushing. Fix and re-run with --push.")
+
+    sys.exit(0 if passed else 1)
+
+
+if __name__ == "__main__":
+    main()
