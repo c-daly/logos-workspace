@@ -1,7 +1,6 @@
 """Tests for harness-run experiment runner."""
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 import yaml
@@ -199,3 +198,32 @@ class TestScaffoldIntegration:
 
         goal_text = (tmp_path / "my_ml_exp" / "goal.yaml").read_text()
         assert "target:" not in goal_text
+
+
+class TestResolveTargetRepo:
+    def test_resolves_first_path_component_as_repo(self, tmp_path):
+        from harness.run import resolve_target_repo
+
+        # Simulate workspace with a git repo
+        repo = tmp_path / "logos"
+        repo.mkdir()
+        (repo / ".git").mkdir()  # Fake .git dir
+
+        result = resolve_target_repo("logos/logos_events/event_bus.py", tmp_path)
+        assert result == repo
+
+    def test_raises_on_missing_repo(self, tmp_path):
+        from harness.run import resolve_target_repo
+
+        with pytest.raises(FileNotFoundError, match="Target repo not found"):
+            resolve_target_repo("nonexistent/foo.py", tmp_path)
+
+
+class TestGoalMissingFile:
+    def test_missing_goal_raises(self, tmp_path):
+        from harness.run import load_goal
+
+        exp_dir = tmp_path / "empty_exp"
+        exp_dir.mkdir()
+        with pytest.raises(FileNotFoundError, match="No goal.yaml"):
+            load_goal(exp_dir)
