@@ -1,0 +1,28 @@
+# LOGOS Experiment Harness
+
+default:
+    @just --list
+
+# Create a new experiment
+new name goal="":
+    python -m harness.new "{{name}}" {{ if goal != "" { "--goal \"" + goal + "\"" } else { "" } }}
+
+# Journal summary for an experiment
+journal experiment:
+    python -m harness.journal {{experiment}} summary
+
+# Known failure modes from journal
+failures experiment:
+    python -m harness.journal {{experiment}} failures
+
+# Metrics across attempts
+metrics experiment:
+    python -m harness.metrics {{experiment}}
+
+# Experiment status
+status experiment:
+    @cat experiments/{{experiment}}/status.yaml
+
+# Run a command with NaN/timeout monitoring
+monitor command timeout="4":
+    python -m harness.monitor --timeout {{timeout}} -- {{command}}

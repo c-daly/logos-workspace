@@ -1,0 +1,70 @@
+# Constraints and Known Failure Modes
+# Read this before every attempt. Learn from past pain.
+
+time_limits:
+  max_hours_per_run: 4
+  max_total_gpu_hours: 40
+  nan_early_stop_batches: 10
+
+resource_limits:
+  gpu_memory_target_gb: 12  # RunPod available as fallback if insufficient
+
+# ==============================================================================
+# WHAT HAS BEEN TRIED — 75 experiments on MSR-VTT (now superseded)
+# ==============================================================================
+
+prior_art:
+  dataset: MSR-VTT (precomputed embeddings in msrvtt_embeddings.h5)
+  vjepa_dim: 1024
+  clip_dim: 768
+  note: |
+    All 75 prior experiments targeted CLIP image embeddings, not text.
+    This was the wrong objective. The training stability lessons below
+    still apply, but the architectures and loss configs should be reconsidered
+    from scratch with InfoNCE against text embeddings as the target.
+  best_result:
+    experiment_id: exp_027_residual_mse_then_tiny_cosine_finish
+    val_cosine_sim: 0.785  # against image embeddings — not comparable to new objective
+    checkpoint: ~/projects/LOGOS/PoCs/jepa_clip_translator/best_translator_exp_027_residual_mse_then_tiny_cosine_finish.pt
+
+known_findings:
+  - "Linear projection is a strong baseline. Always run it first before adding complexity."
+  - "Residual architecture (4 blocks, hidden_dim=1024) was the best prior architecture."
+  - "Long warmup before introducing any cosine term helped stability in prior work."
+  - "grad_clip=0.4 and low lr (4.5e-5) prevented gradient explosion."
+  - "Token-level V-JEPA embeddings require careful batch handling — mean-pool first."
+  - "Tensor format: V-JEPA is (C, T, H, W), CLIP is (T, C, H, W) — handled in precompute_embeddings.py."
+  - "MSR-VTT has 5 captions per video — use all as positives in InfoNCE for stronger signal."
+
+# ==============================================================================
+# HARD CONSTRAINTS
+# ==============================================================================
+
+do_not_do:
+  - "Do NOT fine-tune the V-JEPA encoder (X-Encoder stays frozen)"
+  - "Do NOT fine-tune the CLIP text encoder (Y-Encoder stays frozen — it defines the shared space)"
+  - "Do NOT use CLIP image embeddings as the training target (that was the prior dead end)"
+  - "Do NOT use pure contrastive loss without warmup — prior work showed this causes collapse.
+     Use MSE warmup first if InfoNCE proves unstable, then introduce InfoNCE."
+
+# ==============================================================================
+# ESCALATION — write a journal entry and stop if any of these are true
+# ==============================================================================
+
+escalate_if:
+  - "Cannot load pretrained V-JEPA or CLIP text encoder weights"
+  - "No GPU available and CPU runtime would exceed time limits"
+  - "InfoNCE loss does not decrease after 20 epochs despite warmup and grad clipping"
+  - "Best retrieval_accuracy_at_5 after 3 full training runs is below 0.30"
+  - "Cannot find or generate a valid paired embedding dataset within 2 hours"
+
+# ==============================================================================
+# EMBEDDING STRATEGY NOTE
+# ==============================================================================
+
+embedding_note: |
+  Prior experiments used token-level V-JEPA embeddings (one vector per
+  spatiotemporal token, not pooled). Mean-pool across the token dimension
+  before training: jepa (7010, 32, 1024) → (7010, 1024).
+  Similarly pool clip_text (7010, 5, 768) — or treat each caption as a
+  separate positive pair for richer InfoNCE training signal.

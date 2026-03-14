@@ -1,0 +1,90 @@
+experiment: vjepa_clip_alignment
+current_attempt: 3
+status: passed
+last_updated: 2026-03-11
+
+best_result:
+  attempt: 3
+  version: v7
+  mean_cosine_similarity: 0.7114
+  retrieval_accuracy_at_5: 0.96    # pool=100 (standard eval)
+  retrieval_accuracy_at_1: 0.83    # pool=100
+  r5_full_val: 0.749               # pool=1402
+  r1_full_val: 0.474               # pool=1402
+  training_stability: 1.0
+  eval: PASS
+
+attempt_history:
+  - attempt: 1
+    version: v1-v3
+    date: 2026-03-10
+    description: ResidualMLP from scratch, MSE→InfoNCE hard switch then interpolation
+    best_r5: 0.24
+    outcome: failed — cosine collapsed on InfoNCE switch; frozen V-JEPA features
+              have near-zero linear correlation with CLIP text (max r=0.17)
+  - attempt: 2
+    version: v4
+    date: 2026-03-11
+    description: TransformerPredictor, all 20 captions, DataParallel, cold start
+    best_r5: 0.413
+    best_epoch: 3
+    outcome: killed at ep8 — LR schedule bug caused degradation after ep3
+  - attempt: 2b
+    version: v5
+    date: 2026-03-11
+    description: v4 with LR warmup+cosine, warm-started from v4 best
+    best_r5: ~0.41
+    outcome: abandoned — same ceiling as v4; TransformerPredictor+InfoNCE architecture limited
+  - attempt: 3
+    version: v6+v7
+    date: 2026-03-11
+    description: ResidualTranslator + precomputed CLIP targets + two-phase training
+    outcome: PASS
+
+training_strategy:
+  phase1_v6:
+    architecture: ResidualTranslator (1024→768, 4 residual blocks, SiLU, LayerNorm)
+    warm_start: best_translator_exp_027_residual_mse_then_tiny_cosine_finish.pt
+    target: normalize(0.7*clip_text_mean + 0.3*clip_image_mean)
+    loss: 0.5*MSE + 0.3*CosLoss + 0.2*InfoNCE (false-neg masked, temp=0.07)
+    lr: 3e-5
+    batch: 256
+    epochs: 235
+    patience_metric: val_r5
+    result_r5_full_val: 0.5720
+    result_cosine: 0.6146
+  phase2_v7:
+    warm_start: checkpoints_v6/best_vljepa_v6.pt
+    loss: 0.8*CosLoss + 0.2*InfoNCE
+    lr: 5e-5
+    batch: 512
+    epochs: 61
+    patience_metric: val_cosine
+    result_cosine: 0.7114
+
+pod:
+  id: g9coto5h5r7t0p
+  gpus: 2x RTX 3090
+  cost_per_hr: 0.44
+  status: stopped    # billing halted; network volume preserved
+  total_gpu_hours: ~3.0
+  total_cost: ~$1.30
+  volume_contents:
+    checkpoints:
+      v7_best: /workspace/vjepa_clip_alignment/checkpoints_v7/best_vljepa_v7.pt
+      v6_best: /workspace/vjepa_clip_alignment/checkpoints_v6/best_vljepa_v6.pt
+    eval_data:
+      vjepa_val: /workspace/vjepa_clip_alignment/workspace/val/vjepa_val_embeddings.npy
+      clip_val:  /workspace/vjepa_clip_alignment/workspace/val/clip_val_embeddings.npy
+    projector: /workspace/vjepa_clip_alignment/projector_v7.py
+    eval_script: /workspace/vjepa_clip_alignment/eval/test_alignment.py
+  ssh: ssh -i ~/.ssh/runpod_vjepa/id_ed25519 -p 13660 root@216.249.100.66
+
+local_deliverables:
+  paper: workspace/paper.md
+  html:  workspace/paper.html
+  figure: workspace/figures/training_results.jpg
+  projector_source: workspace/projector.py   # needs updating to v7 if run locally
+  training_scripts:
+    v6: workspace/train_vljepa_v6.py
+    v7: workspace/train_vljepa_v7.py

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "logos-harness"
+version = "0.1.0"
+description = "Structured experiment harness for autonomous ML research agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "pyyaml>=6.0",
+    "numpy",
+]
+
+[project.optional-dependencies]
+otel = [
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+harness-init = "harness.init:main"
+harness-new = "harness.new:main"
+harness-journal = "harness.journal:main"
+harness-metrics = "harness.metrics:main"
+harness-monitor = "harness.monitor:main"
+harness-eval = "harness.pytest_eval:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["harness"]
