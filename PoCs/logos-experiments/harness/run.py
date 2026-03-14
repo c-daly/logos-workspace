@@ -6,6 +6,8 @@ Usage:
 """
 
 import logging
+import os
+import re
 import subprocess
 import sys
 import yaml
@@ -99,3 +101,55 @@ def cleanup_worktree(repo_dir: Path, worktree_path: Path) -> None:
         check=True, capture_output=True, text=True,
     )
     logger.info("Removed worktree at %s (branch kept)", worktree_path)
+
+
+def run_eval(
+    eval_path: str,
+    exp_dir: Path,
+    worktree_path: Optional[Path] = None,
+) -> dict:
+    """Run the eval and return parsed results.
+
+    For integration experiments, adds worktree_path to PYTHONPATH so
+    eval can import real modules.
+    """
+    full_eval_path = exp_dir / eval_path
+
+    env = os.environ.copy()
+    if worktree_path:
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{worktree_path}{os.pathsep}{existing}" if existing else str(worktree_path)
+
+    cmd = [sys.executable, "-m", "pytest", str(full_eval_path),
+           "--tb=short", "-q", "--no-header"]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    output = result.stdout + result.stderr
+    passed = failed = errors = skipped = 0
+
+    for line in output.splitlines():
+        line = line.strip()
+        if "passed" in line or "failed" in line or "error" in line or "skipped" in line:
+            p = re.search(r'(\d+) passed', line)
+            f = re.search(r'(\d+) failed', line)
+            e = re.search(r'(\d+) error', line)
+            s = re.search(r'(\d+) skipped', line)
+            if p: passed = int(p.group(1))
+            if f: failed = int(f.group(1))
+            if e: errors = int(e.group(1))
+            if s: skipped = int(s.group(1))
+
+    total = passed + failed + errors
+    pass_rate = passed / total if total > 0 else 0.0
+
+    return {
+        "tests_passed": passed,
+        "tests_failed": failed,
+        "tests_errors": errors,
+        "tests_skipped": skipped,
+        "tests_total": total + skipped,
+        "pass_rate": round(pass_rate, 4),
+        "exit_code": result.returncode,
+        "output": output,
+    }

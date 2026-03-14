@@ -94,3 +94,36 @@ class TestWorktreeSetup:
         from harness.run import setup_worktree
         result = setup_worktree(repo_dir=None, experiment_name="standalone")
         assert result is None
+
+
+class TestEvalExecution:
+    def test_runs_pytest_eval(self, tmp_path):
+        """Eval runs pytest on the eval directory and captures results."""
+        from harness.run import run_eval
+
+        eval_dir = tmp_path / "eval"
+        eval_dir.mkdir()
+        (eval_dir / "test_trivial.py").write_text("def test_pass(): assert True\n")
+
+        result = run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=None)
+        assert result["pass_rate"] == 1.0
+        assert result["tests_passed"] == 1
+
+    def test_eval_with_worktree_on_pythonpath(self, tmp_path):
+        """Integration eval has the worktree importable."""
+        from harness.run import run_eval
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        (worktree / "my_module.py").write_text("VALUE = 42\n")
+
+        eval_dir = tmp_path / "eval"
+        eval_dir.mkdir()
+        (eval_dir / "test_import.py").write_text(
+            "def test_import():\n"
+            "    from my_module import VALUE\n"
+            "    assert VALUE == 42\n"
+        )
+
+        result = run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=worktree)
+        assert result["pass_rate"] == 1.0
