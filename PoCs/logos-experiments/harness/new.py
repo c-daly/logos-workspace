@@ -208,15 +208,13 @@ def create_experiment(name: str, goal: str = "<describe the objective>"):
         print(f"❌ Experiment '{name}' already exists at {exp_dir}")
         sys.exit(1)
 
-    date = datetime.now().strftime("%Y-%m-%d")
-
     # Create directories
     for subdir in ["journal", "eval", "workspace", "checkpoints"]:
         (exp_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Write the ticket
     (exp_dir / "goal.yaml").write_text(
-        GOAL_TEMPLATE.format(name=name, date=date, goal=goal)
+        GOAL_TEMPLATE.format(name=name, goal=goal)
     )
 
     # Status tracking

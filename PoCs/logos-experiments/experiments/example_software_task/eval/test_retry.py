@@ -58,7 +58,7 @@ class TestRetryBehavior:
         assert mock_redis.publish.call_count == 3
 
     def test_raises_after_max_retries(self):
-        """After 3 retries, the error propagates."""
+        """After 3 retries (4 total calls), the error propagates."""
         EventBus = _get_event_bus()
         bus = EventBus(redis_url="redis://localhost:6379")
         mock_redis = MagicMock()
@@ -68,7 +68,7 @@ class TestRetryBehavior:
         with pytest.raises(ConnectionError):
             bus.publish("events.test", {"key": "value"})
 
-        assert mock_redis.publish.call_count == 3
+        assert mock_redis.publish.call_count == 4
 
     def test_exponential_backoff(self):
         """Retry delays increase exponentially."""
@@ -83,9 +83,9 @@ class TestRetryBehavior:
         bus._redis = mock_redis
 
         delays = []
-        original_sleep = time.sleep
         with patch("time.sleep", side_effect=lambda d: delays.append(d)):
-            bus.publish("events.test", {"key": "value"})
+            with patch("event_bus.sleep", side_effect=lambda d: delays.append(d), create=True):
+                bus.publish("events.test", {"key": "value"})
 
         assert len(delays) == 2
         assert delays[1] > delays[0], "Backoff should increase"

@@ -28,7 +28,7 @@ Use `experiments/<name>/workspace/` for your code, models, artifacts. The ticket
 
 Run the eval specified in `goal.yaml`:
 
-- **Pytest eval**: `harness-eval experiments/<name>` — runs a test suite, reports pass/fail
+- **Pytest eval**: `harness-eval --tests experiments/<name>/eval/` — runs a test suite, reports pass/fail
 - **Custom eval**: `python experiments/<name>/eval/evaluate.py` — reports metrics against thresholds
 
 ### 5. Journal Your Results
@@ -36,7 +36,8 @@ Run the eval specified in `goal.yaml`:
 After each attempt, add a journal entry:
 
 ```bash
-harness-journal experiments/<name> add --attempt N --result "what happened" --next "what to try"
+harness-journal <name> add
+# (interactive: prompts for title, hypothesis, result, next steps)
 ```
 
 Or write directly to `experiments/<name>/journal/NNN_<summary>.md`.
@@ -61,7 +62,7 @@ For complex experiments, use agent teams to parallelize independent sub-tasks. T
 | Command | Purpose |
 |---------|---------|
 | `harness-new <name>` | Scaffold a new experiment |
-| `harness-eval <experiment>` | Run pytest-based eval |
+| `harness-eval --tests experiments/<name>/eval/` | Run pytest-based eval |
 | `harness-journal <experiment> add` | Add a journal entry |
 | `harness-journal <experiment> summary` | View attempt history |
 | `harness-metrics <experiment>` | Show metric trends |
