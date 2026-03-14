@@ -35,7 +35,26 @@ def _contrastive(
     return {"loss": loss, "accuracy": acc}
 
 
-_PRIMITIVES = {"mse": _mse, "cosine": _cosine, "contrastive": _contrastive}
+def _infonce(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    temperature: float = 0.07,
+    label_smoothing: float = 0.0,
+    **_,
+) -> torch.Tensor:
+    """InfoNCE with false-negative masking support."""
+    pred_n = F.normalize(pred, dim=-1)
+    target_n = F.normalize(target, dim=-1)
+    B = pred.shape[0]
+    sim = pred_n @ target_n.T / temperature
+    labels = torch.arange(B, device=pred.device)
+    return 0.5 * (
+        F.cross_entropy(sim, labels, label_smoothing=label_smoothing)
+        + F.cross_entropy(sim.T, labels, label_smoothing=label_smoothing)
+    )
+
+
+_PRIMITIVES = {"mse": _mse, "cosine": _cosine, "contrastive": _contrastive, "infonce": _infonce}
 
 
 def _resolve_target(
@@ -69,11 +88,15 @@ def compute_loss(
         # If pred has a token dimension that target lacks, pool pred first.
         # (e.g. clip_text targets are (B, 768) while pred may be (B, T, 768))
         effective_pred = pred.mean(dim=1) if pred.dim() > target.dim() else pred
-        result = _PRIMITIVES[t.function](effective_pred, target, temperature=t.temperature, label_smoothing=t.label_smoothing)
-        total = total + t.weight * result["loss"]
+        raw = _PRIMITIVES[t.function](effective_pred, target, temperature=t.temperature, label_smoothing=t.label_smoothing)
+        if isinstance(raw, dict):
+            loss_val = raw["loss"]
+            if "accuracy" in raw and acc is None:
+                acc = raw["accuracy"]
+        else:
+            loss_val = raw
+        total = total + t.weight * loss_val
         total_weight += t.weight
-        if "accuracy" in result and acc is None:
-            acc = result["accuracy"]
     out: dict = {"loss": total / max(total_weight, 1e-8)}
     if acc is not None:
         out["accuracy"] = acc

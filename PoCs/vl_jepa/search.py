@@ -267,6 +267,8 @@ def run_experiment(
     best_val_loss = float("inf")  # for reporting only
     best_r5 = 0.0  # primary: used for checkpoint + early stopping
     best_r1 = 0.0
+    best_txt_r1 = 0.0
+    best_txt_r5 = 0.0
     best_epoch = 0
     best_state = None
     patience_counter = 0
@@ -300,6 +302,7 @@ def run_experiment(
         val_batches = 0
         _val_preds: list = []
         _val_clips: list = []
+        _val_txts: list = []
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
@@ -313,16 +316,22 @@ def run_experiment(
                 val_batches += 1
                 _val_preds.append(pred.cpu())
                 _val_clips.append(batch_clip_img.cpu())
+                _val_txts.append(batch_clip_txt.cpu())
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
         avg_val_cos = val_cos_sum / max(val_batches, 1)
-        # Compute R@1 / R@5 on full val set
+        # Compute R@1 / R@5 on full val set (image retrieval)
         _p = F.normalize(torch.cat(_val_preds), dim=-1)
         _c = F.normalize(torch.cat(_val_clips), dim=-1)
         _sim = _p @ _c.T
         _lbl = torch.arange(len(_p))
         val_r1 = (_sim.argmax(1) == _lbl).float().mean().item()
         val_r5 = (_sim.topk(5, 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
+        # Text retrieval: translated vs clip_text
+        _t = F.normalize(torch.cat(_val_txts), dim=-1)
+        _sim_txt = _p @ _t.T
+        txt_r1 = (_sim_txt.argmax(1) == _lbl).float().mean().item()
+        txt_r5 = (_sim_txt.topk(5, 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
 
         history.append({
             "epoch": epoch,
@@ -331,22 +340,26 @@ def run_experiment(
             "val_cosine_sim": avg_val_cos,
             "R@1": val_r1,
             "R@5": val_r5,
+            "txt_R@1": txt_r1,
+            "txt_R@5": txt_r5,
             "lr": current_lr,
         })
         logger.info(
-            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  lr=%.2e",
-            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, current_lr,
+            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  txt_R@1=%.3f  txt_R@5=%.3f  lr=%.2e",
+            epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, txt_r1, txt_r5, current_lr,
         )
 
         if val_r5 > best_r5:
             best_r5 = val_r5
             best_r1 = val_r1
+            best_txt_r1 = txt_r1
+            best_txt_r5 = txt_r5
             best_val_loss = avg_val_loss
             best_epoch = epoch
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
-            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f", epoch, val_r5, val_r1)
+            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f  txt_R@1=%.3f", epoch, val_r5, val_r1, txt_r1)
         else:
             patience_counter += 1
 
@@ -354,13 +367,15 @@ def run_experiment(
             logger.info("  Early stopping at epoch %d.", epoch)
             break
 
-    best_cos = history[best_epoch - 1]["val_cosine_sim"] if history else 0.0
+    best_cos = history[best_epoch - 1]["val_cosine_sim"] if history and best_epoch > 0 else 0.0
     return {
         "experiment_id": cfg.experiment_id,
         "val_loss": best_val_loss,
         "val_cosine_sim": best_cos,
         "R@1": best_r1,
         "R@5": best_r5,
+        "txt_R@1": best_txt_r1,
+        "txt_R@5": best_txt_r5,
         "epochs_trained": len(history),
         "best_epoch": best_epoch,
         "config": cfg.to_dict(),
@@ -459,6 +474,9 @@ def run_search(
         round_best_cos = 0.0
         round_best_metric = 0.0
         for cfg in configs:
+            if cfg.training.batch_size > 256:
+                logger.info("  Capping batch_size %d→256 (OOM guard)", cfg.training.batch_size)
+                cfg.training.batch_size = 256
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
             _save_log(all_results, output_path)
@@ -542,16 +560,22 @@ def run_search(
             best_result["experiment_id"],
         )
 
-    # Save checkpoint
-    checkpoint_path = f"best_translator_{best_result['experiment_id']}.pt"
-    torch.save({
-        "model_state_dict": best_result.get("best_state"),
-        "config": best_result["config"],
-        "val_loss": best_result["val_loss"],
-        "val_cosine_sim": best_result["val_cosine_sim"],
-        "eval_results": eval_results,
-    }, checkpoint_path)
-    logger.info("Checkpoint saved: %s", checkpoint_path)
+    # Save checkpoint (only if model state is available — skip on pure-resume runs)
+    if best_result.get("best_state") is not None:
+        checkpoint_path = f"best_translator_{best_result['experiment_id']}.pt"
+        torch.save({
+            "model_state_dict": best_result["best_state"],
+            "config": best_result["config"],
+            "val_loss": best_result["val_loss"],
+            "val_cosine_sim": best_result["val_cosine_sim"],
+            "eval_results": eval_results,
+        }, checkpoint_path)
+        logger.info("Checkpoint saved: %s", checkpoint_path)
+    else:
+        logger.warning(
+            "Skipping checkpoint save for %s — no model state (loaded from JSON log)",
+            best_result["experiment_id"],
+        )
 
     # Save log
     log_data = {
@@ -582,7 +606,7 @@ def main() -> None:
     parser.add_argument("--llm-provider", default=None, help="LLM provider: openai (default) or anthropic")
     parser.add_argument("--llm-model", default=None, help="Model name (default: gpt-4o for openai, claude-opus-4-6 for anthropic)")
     parser.add_argument("--max-experiments", type=int, default=None)
-    parser.add_argument("--target-metric", default=None, choices=["val_cosine_sim", "R@1", "R@5"])
+    parser.add_argument("--target-metric", default=None, choices=["val_cosine_sim", "R@1", "R@5", "txt_R@1", "txt_R@5"])
     parser.add_argument("--target-value", type=float, default=None)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()

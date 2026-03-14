@@ -64,8 +64,8 @@ class TrainingConfig:
     grad_clip: float = 1.0
 
     def __post_init__(self):
-        if self.batch_size > 512:
-            self.batch_size = 512
+        if self.batch_size > 256:
+            self.batch_size = 256
 
 
 @dataclass

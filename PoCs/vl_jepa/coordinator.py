@@ -49,7 +49,8 @@ Schema (all fields optional — only include what you're changing from defaults)
   - stages (optional list): build a pipeline of heterogeneous stages instead of a single type. Each stage is a dict with its own type/hidden_dim/etc. Dimensions chain automatically — each stage's hidden_dim is its output width, except the last stage which always outputs to clip_dim (768). Use this to combine architectures, e.g. residual feature extraction followed by an MLP bottleneck. Example: [{"type": "residual", "hidden_dim": 1024, "num_blocks": 6}, {"type": "mlp", "hidden_dim": 512, "num_layers": 2}]. When stages is set, top-level type/hidden_dim/etc. are ignored.
 - loss.terms: [{function (mse|cosine|infonce), target (clip_image|clip_text_mean|clip_text_first), weight, temperature (0.01-1.0), label_smoothing (0.0-0.2)}]
 - loss.warmup_terms: loss mix for first warmup_epochs epochs; loss.warmup_epochs: int
-- training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256|512|1024), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
+- training: optimizer (adamw|adam|sgd), lr (1e-6 to 5e-2), lr_min, lr_schedule (cosine|step|none), warmup_epochs (0-30), cooldown_epochs (0-50), cooldown_lr, weight_decay (0.0-0.3), batch_size (64|128|256), max_epochs (50-500), early_stop_patience (5-30), grad_clip (0.1-10.0)
+CRITICAL: batch_size must be <= 256. Token-level training multiplies effective batch by K=32 -- larger values cause GPU OOM on a 24GB card.
 - data: noise_std (0.0-0.1), embedding_dropout (0.0-0.3), num_tokens (int or null) — for token-level JEPA: number of temporal tokens to use (null = all); for legacy mean-pooled JEPA: number of CLIP frames to average (null = all)
 
 Example pipeline config (stages override top-level type):
@@ -265,7 +266,7 @@ def generate_round1_configs() -> list[ExperimentConfig]:
         ExperimentConfig(
             experiment_id="exp_001_transformer",
             architecture=ArchitectureConfig(type="transformer", hidden_dim=512, num_blocks=4, num_heads=8, dropout=0.05),
-            training=TrainingConfig(batch_size=512, max_epochs=300, early_stop_patience=20,
+            training=TrainingConfig(batch_size=256, max_epochs=300, early_stop_patience=20,
                                     lr=5e-4, warmup_epochs=20, cooldown_epochs=40, lr_schedule="cosine"),
             loss=LossConfig(terms=[
                 {"function": "cosine", "target": "clip_image", "weight": 0.7, "temperature": 0.07, "label_smoothing": 0.0},

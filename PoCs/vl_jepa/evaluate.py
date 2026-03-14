@@ -92,10 +92,11 @@ def evaluate_checkpoint(
     ``"text_retrieval"`` (R@K metrics vs CLIP text, first caption),
     ``"cosine_sim_mean"``, and ``"cosine_sim_std"``.
     """
-    # 1. Load validation data.
-    from precompute_embeddings import EmbeddingPrecomputer  # lazy import
-    _, val_data = EmbeddingPrecomputer.load_split(
-        embeddings_path, val_fraction=cfg.data.val_fraction
+    # 1. Load validation data using the local search module.
+    from search import load_embeddings
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _, val_data, _ = load_embeddings(
+        embeddings_path, device, val_fraction=cfg.data.val_fraction,
     )
     val_jepa = val_data["jepa"].float()
     val_clip_image = val_data["clip_image"].float()
@@ -104,7 +105,6 @@ def evaluate_checkpoint(
     logger.info("Validation set: %d samples", len(val_jepa))
 
     # 2. Load model from checkpoint.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_translator(cfg.architecture, cfg.vjepa_dim, cfg.clip_dim).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
     state = ckpt.get("model_state_dict", ckpt.get("best_state", ckpt))
