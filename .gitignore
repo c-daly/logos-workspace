@@ -5,6 +5,10 @@ talos/
 apollo/
 logos/
 
+.ipynb_checkpoints/
+*log.json
+*.log
+
 # Separate wiki repo
 wiki/
 
