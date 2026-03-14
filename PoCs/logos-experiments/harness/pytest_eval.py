@@ -72,7 +72,7 @@ def run_pytest(test_path: str, marker: str = None, verbose: bool = False) -> dic
             if s:
                 skipped = int(s.group(1))
 
-    total = passed + failed + errors + skipped
+    total = passed + failed + errors
     pass_rate = passed / total if total > 0 else 0.0
 
     return {
@@ -80,7 +80,7 @@ def run_pytest(test_path: str, marker: str = None, verbose: bool = False) -> dic
         "tests_failed": failed,
         "tests_errors": errors,
         "tests_skipped": skipped,
-        "tests_total": total,
+        "tests_total": total + skipped,
         "pass_rate": round(pass_rate, 4),
         "exit_code": result.returncode,
         "output": output,
