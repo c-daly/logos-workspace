@@ -113,12 +113,23 @@ def setup_worktree(
 
 
 def cleanup_worktree(repo_dir: Path, worktree_path: Path) -> None:
-    """Remove a worktree but keep the branch for inspection."""
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "worktree", "remove",
-         str(worktree_path), "--force"],
-        check=True, capture_output=True, text=True,
+    """Remove a worktree but keep the branch for inspection.
+
+    Does NOT force-remove. If the worktree has uncommitted changes (e.g. agent
+    work in progress), logs a warning and leaves it intact rather than silently
+    discarding work. Caller can force-remove manually.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "worktree", "remove", str(worktree_path)],
+        capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        logger.warning(
+            "Worktree %s not removed (may have uncommitted changes). "
+            "Remove manually: git worktree remove --force %s",
+            worktree_path, worktree_path,
+        )
+        return
     logger.info("Removed worktree at %s (branch kept)", worktree_path)
 
 
@@ -315,6 +326,8 @@ def main():
                 print(f"\nPR created: {url}")
             else:
                 print("\nEval failed — not pushing. Fix and re-run with --push.")
+    except subprocess.TimeoutExpired:
+        print(f"\n[EVAL] TIMEOUT — eval exceeded {_EVAL_TIMEOUT}s limit")
     finally:
         if wt_info:
             cleanup_worktree(wt_info.repo_dir, wt_info.worktree_path)

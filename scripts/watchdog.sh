@@ -78,10 +78,15 @@ while true; do
 
   echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] PID $PID died — restarting..."
 
-  # Export captured env, cd to workdir, re-run the original command verbatim.
-  # CMDLINE is already shell-quoted so eval reconstructs the argv correctly.
   ENV_EXPORTS=$(echo "$ENVIRON" | grep -v '^$' | sed "s/'/'\\\\''/g; s/^/export '/; s/$/'/")
-  RESTART_SCRIPT="cd $(printf '%q' "$WORKDIR"); $ENV_EXPORTS; nohup bash -c "$CMDLINE" >/dev/null 2>&1 & echo \$!"
+
+  # Build restart script as newline-separated statements.
+  # ENV_EXPORTS is multi-line (one 'export KEY=VAL' per line), so we cannot use
+  # && chaining — a line starting with && is a shell syntax error. Newlines work
+  # as statement separators and keep the structure valid regardless of how many
+  # environment variables there are.
+  RESTART_SCRIPT=$(printf 'cd %q\n%s\nnohup bash -c %q >/dev/null 2>&1 & echo $!' \
+    "$WORKDIR" "$ENV_EXPORTS" "$CMDLINE")
 
   NEW_PID=$(RUN "$RESTART_SCRIPT" 2>/dev/null || echo "")
 

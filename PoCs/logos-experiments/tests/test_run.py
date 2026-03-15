@@ -88,6 +88,30 @@ class TestWorktreeSetup:
         )
         assert "exp/test_exp" in out.stdout
 
+    def test_cleanup_skips_dirty_worktree(self, tmp_path):
+        """cleanup_worktree warns and skips removal when worktree has uncommitted changes."""
+        import logging
+        from harness.run import setup_worktree, cleanup_worktree
+
+        repo_dir = tmp_path / "logos"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init", str(repo_dir)], check=True, capture_output=True)
+        (repo_dir / "dummy.py").write_text("x = 1")
+        subprocess.run(["git", "-C", str(repo_dir), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], check=True, capture_output=True)
+
+        result = setup_worktree(repo_dir=repo_dir, experiment_name="dirty_exp")
+        wt_path = result.worktree_path
+
+        # Simulate uncommitted agent work in the worktree
+        (wt_path / "agent_output.py").write_text("result = 42")
+
+        # Should not raise even though worktree is dirty
+        cleanup_worktree(repo_dir=repo_dir, worktree_path=wt_path)
+
+        # Worktree should still exist — agent work preserved
+        assert wt_path.exists()
+
     def test_returns_none_for_standalone(self, tmp_path):
         """Standalone experiments don't get a worktree."""
         from harness.run import setup_worktree
@@ -126,6 +150,19 @@ class TestEvalExecution:
 
         result = run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=worktree)
         assert result["pass_rate"] == 1.0
+
+    def test_timeout_raises_cleanly(self, tmp_path):
+        """TimeoutExpired propagates from run_eval so main() can catch it cleanly."""
+        from unittest.mock import patch, MagicMock
+        from harness.run import run_eval
+
+        eval_dir = tmp_path / "eval"
+        eval_dir.mkdir()
+        (eval_dir / "test_trivial.py").write_text("def test_pass(): assert True\n")
+
+        with patch("harness.run.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=1)):
+            with pytest.raises(subprocess.TimeoutExpired):
+                run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=None, timeout=1)
 
 
 class TestPushFlag:
