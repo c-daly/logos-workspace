@@ -5,3 +5,7 @@ log.json
 __pycache__/
 *.pyc
 .venv/
+experiment_log*.json
+search.log
+run_logs/
+*.pt

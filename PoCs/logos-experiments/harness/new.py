@@ -45,6 +45,27 @@ eval: eval/evaluate.py
 #   Anything else the agent should know but doesn't need to know.
 """
 
+INTEGRATION_GOAL_TEMPLATE = """# {name}
+
+objective: |
+  {goal}
+
+target: {target}
+
+success_criteria:
+  - metric: test_pass_rate
+    threshold: 1.0
+    primary: true
+
+eval: eval/
+
+# context: |
+#   Why this matters, background info.
+
+# notes: |
+#   Anything else the agent should know.
+"""
+
 
 CONSTRAINTS_TEMPLATE = """\
 # Constraints for: {name}
@@ -83,6 +104,32 @@ best_result:
 total_gpu_hours: 0.0
 total_attempts: 0
 last_updated: null
+"""
+
+
+INTEGRATION_EVAL_TEMPLATE = """\
+\"\"\"
+Integration eval for: {name}
+
+These pytest tests run against the real code in the target repo. The worktree
+is on PYTHONPATH (set by harness-run), so you can import target modules directly.
+
+Implement each test to verify the objective from goal.yaml. All tests must pass
+for harness-run to consider the experiment a success.
+\"\"\"
+import pytest
+
+
+def test_placeholder():
+    \"\"\"Replace with tests that verify the objective.
+
+    Example:
+        from logos_events.event_bus import EventBus
+        bus = EventBus()
+        result = bus.publish(\"topic\", {{\"key\": \"value\"}})
+        assert result is not None
+    \"\"\"
+    raise NotImplementedError(\"Implement this test against the target module\")
 """
 
 
@@ -202,30 +249,44 @@ if __name__ == "__main__":
 """
 
 
-def create_experiment(name: str, goal: str = "<describe the objective>"):
+def create_experiment(name: str, goal: str = "<describe the objective>", target: str = None):
     exp_dir = EXPERIMENTS_DIR / name
     if exp_dir.exists():
         print(f"❌ Experiment '{name}' already exists at {exp_dir}")
         sys.exit(1)
 
-    # Create directories
-    for subdir in ["journal", "eval", "workspace", "checkpoints"]:
+    # Create directories — integration experiments don't need a local workspace/
+    # directory since the agent works directly in the git worktree.
+    subdirs = ["journal", "eval", "checkpoints"]
+    if not target:
+        subdirs.append("workspace")
+    for subdir in subdirs:
         (exp_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Write the ticket
-    (exp_dir / "goal.yaml").write_text(
-        GOAL_TEMPLATE.format(name=name, goal=goal)
-    )
+    if target:
+        (exp_dir / "goal.yaml").write_text(
+            INTEGRATION_GOAL_TEMPLATE.format(name=name, goal=goal, target=target)
+        )
+    else:
+        (exp_dir / "goal.yaml").write_text(
+            GOAL_TEMPLATE.format(name=name, goal=goal)
+        )
 
     # Status tracking
     (exp_dir / "status.yaml").write_text(
         STATUS_TEMPLATE.format(name=name)
     )
 
-    # Eval skeleton
-    (exp_dir / "eval" / "evaluate.py").write_text(
-        EVAL_TEMPLATE.format(name=name)
-    )
+    # Eval skeleton — integration gets pytest test file; standalone gets evaluate.py harness
+    if target:
+        (exp_dir / "eval" / "test_integration.py").write_text(
+            INTEGRATION_EVAL_TEMPLATE.format(name=name)
+        )
+    else:
+        (exp_dir / "eval" / "evaluate.py").write_text(
+            EVAL_TEMPLATE.format(name=name)
+        )
 
     # Journal placeholder
     (exp_dir / "journal" / ".gitkeep").touch()
@@ -235,7 +296,10 @@ def create_experiment(name: str, goal: str = "<describe the objective>"):
 
     print(f"✅ Created: {exp_dir}")
     print(f"   Edit goal.yaml to define the ticket.")
-    print(f"   Edit eval/evaluate.py to define how success is measured.")
+    if target:
+        print(f"   Edit eval/test_integration.py to implement the verification tests.")
+    else:
+        print(f"   Edit eval/evaluate.py to define how success is measured.")
 
 
 def main():
@@ -243,9 +307,11 @@ def main():
     parser.add_argument("name", help="Experiment name")
     parser.add_argument("--goal", "-g", default="<describe the objective>",
                         help="Objective (can also edit goal.yaml directly)")
+    parser.add_argument("--target", "-t", default=None,
+                        help="Target file for integration experiments (e.g. logos/logos_events/event_bus.py)")
     args = parser.parse_args()
 
-    create_experiment(args.name, args.goal)
+    create_experiment(args.name, args.goal, target=args.target)
 
 
 if __name__ == "__main__":
