@@ -148,6 +148,12 @@ def run_eval(
     eval hangs beyond `timeout` seconds.
     """
     full_eval_path = exp_dir / eval_path
+    try:
+        full_eval_path.resolve().relative_to(exp_dir.resolve())
+    except ValueError:
+        raise ValueError(
+            f"eval_path '{eval_path}' resolves outside experiment directory"
+        )
 
     env = os.environ.copy()
     if environment:

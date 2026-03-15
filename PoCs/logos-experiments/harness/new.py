@@ -107,6 +107,32 @@ last_updated: null
 """
 
 
+INTEGRATION_EVAL_TEMPLATE = """\
+\"\"\"
+Integration eval for: {name}
+
+These pytest tests run against the real code in the target repo. The worktree
+is on PYTHONPATH (set by harness-run), so you can import target modules directly.
+
+Implement each test to verify the objective from goal.yaml. All tests must pass
+for harness-run to consider the experiment a success.
+\"\"\"
+import pytest
+
+
+def test_placeholder():
+    \"\"\"Replace with tests that verify the objective.
+
+    Example:
+        from logos_events.event_bus import EventBus
+        bus = EventBus()
+        result = bus.publish(\"topic\", {{\"key\": \"value\"}})
+        assert result is not None
+    \"\"\"
+    raise NotImplementedError(\"Implement this test against the target module\")
+"""
+
+
 EVAL_TEMPLATE = """\
 \"\"\"
 Evaluation harness for: {name}
@@ -248,10 +274,15 @@ def create_experiment(name: str, goal: str = "<describe the objective>", target:
         STATUS_TEMPLATE.format(name=name)
     )
 
-    # Eval skeleton
-    (exp_dir / "eval" / "evaluate.py").write_text(
-        EVAL_TEMPLATE.format(name=name)
-    )
+    # Eval skeleton — integration gets pytest test file; standalone gets evaluate.py harness
+    if target:
+        (exp_dir / "eval" / "test_integration.py").write_text(
+            INTEGRATION_EVAL_TEMPLATE.format(name=name)
+        )
+    else:
+        (exp_dir / "eval" / "evaluate.py").write_text(
+            EVAL_TEMPLATE.format(name=name)
+        )
 
     # Journal placeholder
     (exp_dir / "journal" / ".gitkeep").touch()

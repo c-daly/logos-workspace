@@ -311,6 +311,15 @@ class TestScaffoldIntegration:
         assert "target:" in goal_text
         assert "logos/logos_events/event_bus.py" in goal_text
 
+        # Integration experiments must get a pytest test file, not the standalone harness
+        exp_dir = tmp_path / "retry_eventbus"
+        assert (exp_dir / "eval" / "test_integration.py").exists(), \
+            "Integration experiment should scaffold test_integration.py for pytest"
+        assert not (exp_dir / "eval" / "evaluate.py").exists(), \
+            "Integration experiment must not scaffold standalone evaluate.py"
+        test_text = (exp_dir / "eval" / "test_integration.py").read_text()
+        assert "def test_" in test_text, "Scaffolded file must contain a pytest test function"
+
     def test_new_standalone_no_target(self, tmp_path, monkeypatch):
         """harness-new without --target creates standard goal.yaml."""
         from harness import new as new_module
@@ -322,6 +331,11 @@ class TestScaffoldIntegration:
 
         goal_text = (tmp_path / "my_ml_exp" / "goal.yaml").read_text()
         assert "target:" not in goal_text
+
+        # Standalone experiments still get the old evaluate.py harness
+        exp_dir = tmp_path / "my_ml_exp"
+        assert (exp_dir / "eval" / "evaluate.py").exists(), \
+            "Standalone experiment should scaffold evaluate.py"
 
 
 class TestResolveTargetRepo:
@@ -353,6 +367,30 @@ class TestResolveTargetRepo:
 
         with pytest.raises(ValueError, match="Invalid target repo name"):
             resolve_target_repo("/etc/passwd", tmp_path)
+
+
+class TestEvalPathBoundary:
+    def test_eval_path_traversal_raises(self, tmp_path):
+        """eval_path that escapes exp_dir raises ValueError."""
+        from harness.run import run_eval
+
+        exp_dir = tmp_path / "experiments" / "my_exp"
+        exp_dir.mkdir(parents=True)
+
+        with pytest.raises(ValueError, match="resolves outside experiment directory"):
+            run_eval(eval_path="../../etc", exp_dir=exp_dir, worktree_path=None)
+
+    def test_eval_path_within_exp_dir_is_allowed(self, tmp_path):
+        """eval_path within the experiment dir does not raise."""
+        from harness.run import run_eval
+
+        exp_dir = tmp_path / "experiments" / "my_exp"
+        eval_dir = exp_dir / "eval"
+        eval_dir.mkdir(parents=True)
+        (eval_dir / "test_ok.py").write_text("def test_pass(): assert True\n")
+
+        result = run_eval(eval_path="eval/", exp_dir=exp_dir, worktree_path=None)
+        assert result["pass_rate"] == 1.0
 
 
 class TestGoalMissingFile:
