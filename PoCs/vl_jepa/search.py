@@ -8,6 +8,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
+from datetime import datetime
 import json
 import logging
 import math
@@ -29,62 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Log persistence helpers
-# ---------------------------------------------------------------------------
-
-def _save_log(all_results: list[dict], output_path: str) -> None:
-    """Write experiment log to JSON, excluding non-serializable best_state."""
-    log_data = {"experiments": [{k: v for k, v in r.items() if k != "best_state"}
-                                 for r in all_results]}
-    with open(output_path, "w") as f:
-        json.dump(log_data, f, indent=2)
-
-
-def _load_existing_log(path: str) -> list[dict]:
-    """Load prior results from JSON. Returns [] if file missing or malformed."""
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path) as f:
-            return json.load(f).get("experiments", [])
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.warning("Could not load existing log %s: %s", path, e)
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Stopping criteria
-# ---------------------------------------------------------------------------
-
-def _check_stopping(
-    all_results: list[dict],
-    round_num: int,
-    max_rounds: int,
-    max_experiments: int | None,
-    target_metric: str | None,
-    target_value: float | None,
-    convergence_patience: int | None,
-    rounds_without_improvement: int,
-) -> tuple[bool, str]:
-    """Return (should_stop, reason_string)."""
-    if max_experiments is not None and len(all_results) >= max_experiments:
-        return True, f"max_experiments={max_experiments} reached ({len(all_results)} run)"
-    if target_metric and target_value is not None and all_results:
-        best = max(r.get(target_metric, 0.0) for r in all_results)
-        if best >= target_value:
-            return True, f"target {target_metric}>={target_value:.4f} reached (best={best:.4f})"
-    if convergence_patience is not None and rounds_without_improvement >= convergence_patience:
-        return True, (
-            f"convergence patience={convergence_patience} "
-            f"({rounds_without_improvement} rounds no improvement)"
-        )
-    if round_num >= max_rounds:
-        return True, f"max_rounds={max_rounds} reached"
-    return False, ""
-
-
-
-# ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
@@ -100,10 +46,6 @@ def load_embeddings(
         jepa = torch.tensor(np.array(f["jepa_embeddings"]), dtype=torch.float32)
         clip_image = torch.tensor(np.array(f["clip_image_embeddings"]), dtype=torch.float32)
         clip_text = torch.tensor(np.array(f["clip_text_embeddings"]), dtype=torch.float32)
-        # clip_image: (N,64,768) -> use CLS token (pos 0), no mean pooling
-        if clip_image.dim() == 3:
-            clip_image = clip_image[:, 0, :]
-        # clip_text: (N,5,768) kept as-is; training loop samples one caption per batch
 
     n = jepa.shape[0]
     rng = np.random.RandomState(seed)
@@ -183,13 +125,13 @@ def _prepare_batch(
     batch_clip_img: torch.Tensor,
     num_tokens: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Align JEPA and CLIP tensors for the loss, handling both embedding formats.
+    """Align JEPA and CLIP tensors for token-level training.
 
-    Legacy (mean-pooled JEPA): jepa is (B, 1024). CLIP frames are averaged
-    down to (B, 768) so the task remains vector-to-vector.
+    Token-level JEPA (B, T, 1024): subsample to K tokens.
+    Token-level CLIP (B, F, 768): subsample frames to K to match JEPA.
+    Returns (B, K, 1024) and (B, K, 768) — no mean-pooling.
 
-    Token-level JEPA: jepa is (B, T, 1024). CLIP frames are subsampled to
-    match, giving (B, K, 768). num_tokens controls K (None = use all T).
+    Legacy JEPA (B, 1024): mean-pool CLIP for compatibility.
     """
     if batch_jepa.dim() == 3:
         T = batch_jepa.shape[1]
@@ -197,13 +139,16 @@ def _prepare_batch(
         if K < T:
             idx = torch.linspace(0, T - 1, K, dtype=torch.long, device=batch_jepa.device)
             batch_jepa = batch_jepa[:, idx, :]
-        # clip_img is already (B,768) CLS token — no subsample needed
+        # Subsample CLIP frames to match K JEPA tokens — no pooling
+        if batch_clip_img.dim() == 3:
+            F = batch_clip_img.shape[1]
+            K_out = batch_jepa.shape[1]
+            fidx = torch.linspace(0, F - 1, K_out, dtype=torch.long, device=batch_clip_img.device)
+            batch_clip_img = batch_clip_img[:, fidx, :]
     else:
-        # Legacy: average CLIP frames to match the single JEPA vector.
-        F = batch_clip_img.shape[1] if batch_clip_img.dim() == 3 else None
-        if F is not None:
-            K = min(num_tokens, F) if num_tokens else F
-            batch_clip_img = batch_clip_img[:, :K, :].mean(dim=1)
+        # Legacy 2D JEPA: mean-pool CLIP for compatibility
+        if batch_clip_img.dim() == 3:
+            batch_clip_img = batch_clip_img.mean(dim=1)
     return batch_jepa, batch_clip_img
 
 
@@ -236,9 +181,6 @@ def run_experiment(
     )
 
     model = build_translator(cfg.architecture, cfg.vjepa_dim, cfg.clip_dim).to(device)
-    if torch.cuda.device_count() > 1:
-        logger.info("  Using DataParallel across %d GPUs", torch.cuda.device_count())
-        model = nn.DataParallel(model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     opt_cls = {"adamw": torch.optim.AdamW, "adam": torch.optim.Adam, "sgd": torch.optim.SGD}[cfg.training.optimizer]
@@ -264,11 +206,9 @@ def run_experiment(
     )
 
     history = []
-    best_val_loss = float("inf")  # for reporting only
-    best_r5 = 0.0  # primary: used for checkpoint + early stopping
+    best_val_loss = float("inf")
+    best_r5 = 0.0
     best_r1 = 0.0
-    best_txt_r1 = 0.0
-    best_txt_r5 = 0.0
     best_epoch = 0
     best_state = None
     patience_counter = 0
@@ -284,13 +224,20 @@ def run_experiment(
         train_loss_sum = 0.0
         for batch_jepa, batch_clip_img, batch_clip_txt in train_loader:
             batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
-            # Sample one caption per batch (no mean pooling — same approach as v5 training)
-            cap_idx = torch.randint(batch_clip_txt.shape[1], (1,)).item()
-            batch_clip_txt = batch_clip_txt[:, cap_idx, :]
             batch_jepa = _augment(batch_jepa, cfg)
             optimizer.zero_grad()
             pred = model(batch_jepa)
-            result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
+            # Flatten token-level tensors → (B*K, D) for loss functions
+            if pred.dim() == 3:
+                B, K, D = pred.shape
+                pred_l = pred.reshape(B * K, D)
+                clip_img_l = batch_clip_img.reshape(B * K, batch_clip_img.shape[-1])
+                clip_txt_l = batch_clip_txt.unsqueeze(1).expand(B, K, batch_clip_txt.shape[1], batch_clip_txt.shape[2]).reshape(B * K, batch_clip_txt.shape[1], batch_clip_txt.shape[2])
+            else:
+                pred_l = pred
+                clip_img_l = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
+                clip_txt_l = batch_clip_txt
+            result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
             result["loss"].backward()
             if cfg.training.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip)
@@ -306,32 +253,43 @@ def run_experiment(
         with torch.no_grad():
             for batch_jepa, batch_clip_img, batch_clip_txt in val_loader:
                 batch_jepa, batch_clip_img = _prepare_batch(batch_jepa, batch_clip_img, cfg.data.num_tokens)
-                batch_clip_txt = batch_clip_txt[:, 0, :]
                 pred = model(batch_jepa)
-                result = compute_loss(pred, batch_clip_img, batch_clip_txt, active_terms)
+                # Flatten for loss, pool for retrieval
+                if pred.dim() == 3:
+                    B, K, D = pred.shape
+                    pred_l = pred.reshape(B * K, D)
+                    clip_img_l = batch_clip_img.reshape(B * K, batch_clip_img.shape[-1])
+                    clip_txt_l = batch_clip_txt.unsqueeze(1).expand(B, K, batch_clip_txt.shape[1], batch_clip_txt.shape[2]).reshape(B * K, batch_clip_txt.shape[1], batch_clip_txt.shape[2])
+                    pred_pooled = pred.mean(dim=1)
+                    clip_img_pooled = batch_clip_img.mean(dim=1)
+                else:
+                    pred_l = pred
+                    clip_img_l = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
+                    clip_txt_l = batch_clip_txt
+                    pred_pooled = pred
+                    clip_img_pooled = batch_clip_img.mean(dim=1) if batch_clip_img.dim() == 3 else batch_clip_img
+                result = compute_loss(pred_l, clip_img_l, clip_txt_l, active_terms)
                 val_loss_sum += result["loss"].item()
                 val_cos_sum += (
-                    F.normalize(pred, dim=-1) * F.normalize(batch_clip_img, dim=-1)
+                    F.normalize(pred_pooled, dim=-1) * F.normalize(clip_img_pooled, dim=-1)
                 ).sum(-1).mean().item()
                 val_batches += 1
-                _val_preds.append(pred.cpu())
-                _val_clips.append(batch_clip_img.cpu())
-                _val_txts.append(batch_clip_txt.cpu())
+                _val_preds.append(pred_pooled.cpu())
+                _val_clips.append(clip_img_pooled.cpu())
+                _val_txts.append(batch_clip_txt.cpu().mean(dim=1))
 
         avg_val_loss = val_loss_sum / max(val_batches, 1)
         avg_val_cos = val_cos_sum / max(val_batches, 1)
-        # Compute R@1 / R@5 on full val set (image retrieval)
         _p = F.normalize(torch.cat(_val_preds), dim=-1)
         _c = F.normalize(torch.cat(_val_clips), dim=-1)
         _sim = _p @ _c.T
         _lbl = torch.arange(len(_p))
         val_r1 = (_sim.argmax(1) == _lbl).float().mean().item()
-        val_r5 = (_sim.topk(5, 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
-        # Text retrieval: translated vs clip_text
+        val_r5 = (_sim.topk(min(5, len(_p)), 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
         _t = F.normalize(torch.cat(_val_txts), dim=-1)
         _sim_txt = _p @ _t.T
         txt_r1 = (_sim_txt.argmax(1) == _lbl).float().mean().item()
-        txt_r5 = (_sim_txt.topk(5, 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
+        txt_r5 = (_sim_txt.topk(min(5, len(_p)), 1).indices == _lbl.unsqueeze(1)).any(1).float().mean().item()
 
         history.append({
             "epoch": epoch,
@@ -345,21 +303,19 @@ def run_experiment(
             "lr": current_lr,
         })
         logger.info(
-            "  Epoch %d/%d  val_loss=%.4f  cos=%.4f  R@1=%.3f  R@5=%.3f  txt_R@1=%.3f  txt_R@5=%.3f  lr=%.2e",
+            "  Epoch %d/%d  loss=%.4f  cos=%.4f  imgR@1=%.3f  imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  lr=%.2e",
             epoch, cfg.training.max_epochs, avg_val_loss, avg_val_cos, val_r1, val_r5, txt_r1, txt_r5, current_lr,
         )
 
         if val_r5 > best_r5:
             best_r5 = val_r5
             best_r1 = val_r1
-            best_txt_r1 = txt_r1
-            best_txt_r5 = txt_r5
             best_val_loss = avg_val_loss
             best_epoch = epoch
             patience_counter = 0
             _m = model.module if isinstance(model, nn.DataParallel) else model
             best_state = {k: v.cpu().clone() for k, v in _m.state_dict().items()}
-            logger.info("  *** new best (epoch %d)  R@5=%.3f  R@1=%.3f  txt_R@1=%.3f", epoch, val_r5, val_r1, txt_r1)
+            logger.info("  *** new best (epoch %d)  imgR@5=%.3f  imgR@1=%.3f  txtR@1=%.3f  txtR@5=%.3f", epoch, val_r5, val_r1, txt_r1, txt_r5)
         else:
             patience_counter += 1
 
@@ -367,15 +323,15 @@ def run_experiment(
             logger.info("  Early stopping at epoch %d.", epoch)
             break
 
-    best_cos = history[best_epoch - 1]["val_cosine_sim"] if history and best_epoch > 0 else 0.0
+    best_cos = history[best_epoch - 1]["val_cosine_sim"] if history else 0.0
     return {
         "experiment_id": cfg.experiment_id,
         "val_loss": best_val_loss,
         "val_cosine_sim": best_cos,
         "R@1": best_r1,
         "R@5": best_r5,
-        "txt_R@1": best_txt_r1,
-        "txt_R@5": best_txt_r5,
+        "txt_R@1": history[best_epoch - 1].get("txt_R@1", 0.0) if history else 0.0,
+        "txt_R@5": history[best_epoch - 1].get("txt_R@5", 0.0) if history else 0.0,
         "epochs_trained": len(history),
         "best_epoch": best_epoch,
         "config": cfg.to_dict(),
@@ -436,18 +392,29 @@ def evaluate_best(result: dict, test_data: dict, device: torch.device) -> dict:
 # Search loop
 # ---------------------------------------------------------------------------
 
+def _load_existing_log(output_path: str) -> list[dict]:
+    if not os.path.exists(output_path):
+        return []
+    try:
+        with open(output_path) as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 def run_search(
     embeddings_path: str,
     max_rounds: int = 5,
     configs_per_round: int = 5,
     convergence_patience: int | None = None,
-    max_experiments: int | None = None,
-    target_metric: str | None = None,
-    target_value: float | None = None,
-    resume: bool = False,
     device: torch.device = torch.device("cpu"),
     output_path: str = "experiment_log.json",
     llm_config: LLMConfig | None = None,
+    resume: bool = False,
+    max_experiments: int | None = None,
+    target_metric: str = "R@5",
+    target_value: float | None = None,
 ) -> dict:
     train_data, val_data, test_data = load_embeddings(embeddings_path, device)
 
@@ -455,88 +422,117 @@ def run_search(
     warm_start = resume and bool(all_results)
     if warm_start:
         logger.info("Resuming with %d existing results -- skipping round 1 baselines.", len(all_results))
-    best_val_loss = float("inf")
-    best_metric_val = 0.0  # tracks target_metric for convergence
+    llm_log_path = output_path.replace(".json", "_llm.log")
+    logger.info("LLM responses: %s", llm_log_path)
+    best_metric = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
     rounds_without_improvement = 0
 
     for round_num in range(1, max_rounds + 1):
         logger.info("\n%s\n# ROUND %d/%d\n%s", "#" * 70, round_num, max_rounds, "#" * 70)
 
-        configs = (
-            generate_round1_configs() if round_num == 1 and not warm_start
-            else generate_next_configs(
-                all_results, num_configs=configs_per_round, llm_config=llm_config,
-                rounds_without_improvement=rounds_without_improvement,
+        if round_num == 1 and not warm_start:
+            configs = generate_round1_configs()
+        else:
+            configs, recommended_target = generate_next_configs(
+                all_results, num_configs=configs_per_round, llm_config=llm_config, llm_log_path=llm_log_path
             )
-        )
+            if recommended_target and recommended_target != target_metric:
+                logger.info(
+                    "  Coordinator recommends target metric: %s (switching from %s)",
+                    recommended_target, target_metric,
+                )
+                target_metric = recommended_target
+                best_metric = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
         logger.info("  Running %d experiments this round.", len(configs))
 
-        round_best_cos = 0.0
         round_best_metric = 0.0
         for cfg in configs:
+            # Ensure sequential number prefix, keep descriptive name
+            _exp_num = len(all_results) + 1
+            _desc = re.sub(r"^exp_\d{3}_?", "", cfg.experiment_id)
+            cfg.experiment_id = f"exp_{_exp_num:03d}_{_desc}" if _desc else f"exp_{_exp_num:03d}"
+            # Hard cap: token-level training multiplies effective batch by K=32 — OOM above 256
             if cfg.training.batch_size > 256:
-                logger.info("  Capping batch_size %d→256 (OOM guard)", cfg.training.batch_size)
+                logger.info("  Capping batch_size %d→256 (token-level OOM guard)", cfg.training.batch_size)
                 cfg.training.batch_size = 256
             result = run_experiment(cfg, train_data, val_data, device)
             all_results.append(result)
-            _save_log(all_results, output_path)
-            if result["val_cosine_sim"] > round_best_cos:
-                round_best_cos = result["val_cosine_sim"]
-            metric_key = target_metric or "val_cosine_sim"
-            round_best_metric = max(round_best_metric, result.get(metric_key, 0.0))
+            with open(output_path, "w") as _f:
+                json.dump([{k: v for k, v in r.items() if k != "best_state"} for r in all_results], _f, indent=2)
+            if max_experiments is not None and len(all_results) >= max_experiments:
+                logger.info("  Reached max_experiments (%d). Stopping.", max_experiments)
+                break
+            if result.get(target_metric, 0.0) > round_best_metric:
+                round_best_metric = result.get(target_metric, 0.0)
 
-        # Round summary
+        # Round summary — sort and mark by target_metric
         logger.info("\n%s\nROUND %d SUMMARY:\n%s", "-" * 70, round_num, "-" * 70)
-        for r in sorted(all_results[-len(configs):], key=lambda r: -r["val_cosine_sim"]):
+        for r in sorted(all_results[-len(configs):], key=lambda r: -r.get(target_metric, 0.0)):
             arch = _arch_desc_from_dict(r["config"]["architecture"])
-            marker = " <-- best" if r["val_cosine_sim"] == round_best_cos else ""
+            marker = " <-- best" if r.get(target_metric, 0.0) == round_best_metric else ""
             logger.info(
-                "  %-25s %-40s cos=%.4f R@1=%.3f R@5=%.3f loss=%.4f ep=%d%s",
-                r["experiment_id"], arch, r["val_cosine_sim"],
-                r.get("R@1", 0.0), r.get("R@5", 0.0),
-                r["val_loss"], r["epochs_trained"], marker,
+                "  %-30s %-20s imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  ep=%d%s",
+                r["experiment_id"], arch,
+                r.get("R@5", 0.0), r.get("txt_R@1", 0.0), r.get("txt_R@5", 0.0),
+                r["epochs_trained"], marker,
             )
 
-        if round_best_metric > best_metric_val:
-            best_metric_val = round_best_metric
+        if round_best_metric > best_metric:
+            best_metric = round_best_metric
             rounds_without_improvement = 0
-            metric_key = target_metric or "val_cosine_sim"
-            overall_best = max(all_results, key=lambda r: r.get(metric_key, 0.0))
+            overall_best = max(all_results, key=lambda r: r.get(target_metric, 0.0))
             logger.info(
-                "  New best: %s=%.4f (cos=%.4f) -- %s",
-                target_metric, best_metric_val, overall_best["val_cosine_sim"], overall_best["experiment_id"],
+                "  New best: %s=%.3f  imgR@5=%.3f  txtR@1=%.3f -- %s",
+                target_metric, best_metric,
+                overall_best.get("R@5", 0.0), overall_best.get("txt_R@1", 0.0),
+                overall_best["experiment_id"],
             )
+            _ckpt = os.path.join(
+                os.path.dirname(os.path.abspath(output_path)),
+                f"best_r{round_num:02d}_{overall_best['experiment_id']}_{target_metric.replace('@','at')}{best_metric:.3f}.pt",
+            )
+            torch.save({
+                "model_state_dict": overall_best["best_state"],
+                "config": overall_best["config"],
+                "round": round_num,
+                "experiment_id": overall_best["experiment_id"],
+                target_metric: best_metric,
+                "R@5": overall_best.get("R@5", 0.0),
+                "txt_R@1": overall_best.get("txt_R@1", 0.0),
+                "txt_R@5": overall_best.get("txt_R@5", 0.0),
+                "val_cosine_sim": overall_best["val_cosine_sim"],
+                "val_loss": overall_best["val_loss"],
+            }, _ckpt)
+            logger.info("  Checkpoint saved: %s", _ckpt)
         else:
             rounds_without_improvement += 1
             patience_str = f"{rounds_without_improvement}/{convergence_patience}" if convergence_patience else str(rounds_without_improvement)
             logger.info("  No improvement (patience %s).", patience_str)
 
-        effective_target = target_metric or "val_cosine_sim"
-        should_stop, stop_reason = _check_stopping(
-            all_results, round_num, max_rounds,
-            max_experiments, effective_target, target_value,
-            convergence_patience, rounds_without_improvement,
-        )
-        if should_stop:
-            logger.info("  Stopping: %s", stop_reason)
+        if convergence_patience is not None and rounds_without_improvement >= convergence_patience:
+            logger.info("  Converged after %d rounds.", round_num)
             break
+
+        if target_value is not None:
+            _cur = max((r.get(target_metric, 0.0) for r in all_results), default=0.0)
+            if _cur >= target_value:
+                logger.info("  Target %s=%.3f reached (%.3f). Stopping.", target_metric, target_value, _cur)
+                break
 
     # Final leaderboard
     logger.info("\n%s\nFINAL LEADERBOARD (%d experiments)\n%s", "=" * 90, len(all_results), "=" * 90)
-    metric_key = target_metric or "val_cosine_sim"
-    best_result = max(all_results, key=lambda r: r.get(metric_key, 0.0))
-    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get(metric_key, 0.0)), 1):
+    best_result = max(all_results, key=lambda r: r.get(target_metric, 0.0))
+    for rank, r in enumerate(sorted(all_results, key=lambda r: -r.get(target_metric, 0.0)), 1):
         arch = _arch_desc_from_dict(r["config"]["architecture"])
         marker = " *" if r["experiment_id"] == best_result["experiment_id"] else ""
         logger.info(
-            "%2d. %-25s %-40s cos=%.4f R@1=%.3f R@5=%.3f loss=%.4f ep=%d%s",
-            rank, r["experiment_id"], arch, r["val_cosine_sim"],
-            r.get("R@1", 0.0), r.get("R@5", 0.0),
-            r["val_loss"], r["epochs_trained"], marker,
+            "%2d. %-30s %-20s imgR@5=%.3f  txtR@1=%.3f  txtR@5=%.3f  ep=%d%s",
+            rank, r["experiment_id"], arch,
+            r.get("R@5", 0.0), r.get("txt_R@1", 0.0), r.get("txt_R@5", 0.0),
+            r["epochs_trained"], marker,
         )
 
-    # Evaluate best on test set (only if best_state available -- skipped on pure-resume runs)
-    eval_results: dict = {}
+    # Evaluate best on test set
     if best_result.get("best_state") is not None:
         logger.info("\nEvaluating best model on test set: %s", best_result["experiment_id"])
         eval_results = evaluate_best(best_result, test_data, device)
@@ -560,22 +556,16 @@ def run_search(
             best_result["experiment_id"],
         )
 
-    # Save checkpoint (only if model state is available — skip on pure-resume runs)
-    if best_result.get("best_state") is not None:
-        checkpoint_path = f"best_translator_{best_result['experiment_id']}.pt"
-        torch.save({
-            "model_state_dict": best_result["best_state"],
-            "config": best_result["config"],
-            "val_loss": best_result["val_loss"],
-            "val_cosine_sim": best_result["val_cosine_sim"],
-            "eval_results": eval_results,
-        }, checkpoint_path)
-        logger.info("Checkpoint saved: %s", checkpoint_path)
-    else:
-        logger.warning(
-            "Skipping checkpoint save for %s — no model state (loaded from JSON log)",
-            best_result["experiment_id"],
-        )
+    # Save checkpoint
+    checkpoint_path = f"best_translator_{best_result['experiment_id']}.pt"
+    torch.save({
+        "model_state_dict": best_result["best_state"],
+        "config": best_result["config"],
+        "val_loss": best_result["val_loss"],
+        "val_cosine_sim": best_result["val_cosine_sim"],
+        "eval_results": eval_results,
+    }, checkpoint_path)
+    logger.info("Checkpoint saved: %s", checkpoint_path)
 
     # Save log
     log_data = {
@@ -605,10 +595,12 @@ def main() -> None:
     parser.add_argument("--output", default="experiment_log.json")
     parser.add_argument("--llm-provider", default=None, help="LLM provider: openai (default) or anthropic")
     parser.add_argument("--llm-model", default=None, help="Model name (default: gpt-4o for openai, claude-opus-4-6 for anthropic)")
-    parser.add_argument("--max-experiments", type=int, default=None)
-    parser.add_argument("--target-metric", default=None, choices=["val_cosine_sim", "R@1", "R@5", "txt_R@1", "txt_R@5"])
-    parser.add_argument("--target-value", type=float, default=None)
-    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--max-experiments", type=int, default=None, help="Stop after this many total experiments")
+    parser.add_argument("--target-metric", default="R@5", choices=["val_cosine_sim", "R@1", "R@5", "txt_R@1", "txt_R@5"],
+                        help="Metric to target (default: R@5)")
+    parser.add_argument("--target-value", type=float, default=None,
+                        help="Stop early if target-metric reaches this value")
+    parser.add_argument("--resume", action="store_true", help="Resume from existing output log")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -616,15 +608,13 @@ def main() -> None:
         format="%(asctime)s %(message)s",
         datefmt="%H:%M:%S",
     )
-    import os as _os
-    from datetime import datetime as _dt
-    _log_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "run_logs")
-    _os.makedirs(_log_dir, exist_ok=True)
-    _run_log = _os.path.join(_log_dir, "run_" + _dt.now().strftime("%Y%m%d_%H%M%S") + ".log")
+    _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_logs")
+    os.makedirs(_log_dir, exist_ok=True)
+    _run_log = os.path.join(_log_dir, "run_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".log")
     _fh = logging.FileHandler(_run_log)
     _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
     logging.getLogger().addHandler(_fh)
-    logging.getLogger(__name__).info("Run log: %s", _run_log)
+    logger.info("Run log: %s", _run_log)
 
     device = torch.device(args.device)
     logger.info("Device: %s", device)
@@ -640,13 +630,13 @@ def main() -> None:
         max_rounds=args.rounds,
         configs_per_round=args.configs_per_round,
         convergence_patience=args.convergence_patience,
-        max_experiments=args.max_experiments,
-        target_metric=args.target_metric,
-        target_value=args.target_value,
-        resume=args.resume,
         device=device,
         output_path=args.output,
         llm_config=llm_config,
+        resume=args.resume,
+        max_experiments=args.max_experiments,
+        target_metric=args.target_metric,
+        target_value=args.target_value,
     )
 
 
