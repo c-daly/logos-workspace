@@ -54,10 +54,13 @@ fi
 # Capture process info from /proc while it's alive
 echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Attaching to PID $PID"
 
-CMDLINE=$(RUN "cat /proc/$PID/cmdline | tr '\\0' ' ' | sed 's/ $//'" 2>/dev/null) || {
+# Capture cmdline as a properly shell-quoted string (one %q token per arg)
+CMDLINE=$(RUN "tr '\0' '\n' < /proc/$PID/cmdline | while IFS= read -r arg; do printf '%q ' \"\$arg\"; done" 2>/dev/null) || {
   echo "Error: PID $PID not found" >&2; exit 1
 }
-ENVIRON=$(RUN "cat /proc/$PID/environ | tr '\\0' '\\n'" 2>/dev/null || echo "")
+CMDLINE="${CMDLINE% }"  # strip trailing space
+
+ENVIRON=$(RUN "cat /proc/$PID/environ | tr '\0' '\n'" 2>/dev/null || echo "")
 if [[ -z "$WORKDIR" ]]; then
   WORKDIR=$(RUN "readlink /proc/$PID/cwd" 2>/dev/null || echo "")
 fi
@@ -75,15 +78,12 @@ while true; do
 
   echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] PID $PID died — restarting..."
 
-  # Reconstruct env + cmd and launch detached
-  RESTART=$(cat <<EOF
-cd '$WORKDIR'
-$(echo "$ENVIRON" | grep -v '^$' | sed "s/'/'\\\\''/g; s/^/export '/; s/$/'/")
-nohup $CMDLINE >/dev/null 2>&1 &
-echo \$!
-EOF
-)
-  NEW_PID=$(RUN "$RESTART" 2>/dev/null || echo "")
+  # Export captured env, cd to workdir, re-run the original command verbatim.
+  # CMDLINE is already shell-quoted so eval reconstructs the argv correctly.
+  ENV_EXPORTS=$(echo "$ENVIRON" | grep -v '^$' | sed "s/'/'\\\\''/g; s/^/export '/; s/$/'/")
+  RESTART_SCRIPT="cd $(printf '%q' "$WORKDIR"); $ENV_EXPORTS; nohup eval $CMDLINE >/dev/null 2>&1 & echo \$!"
+
+  NEW_PID=$(RUN "$RESTART_SCRIPT" 2>/dev/null || echo "")
 
   if [[ -n "$NEW_PID" ]]; then
     echo "  Restarted (new PID $NEW_PID)"

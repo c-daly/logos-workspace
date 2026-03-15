@@ -161,12 +161,33 @@ class TestPushFlag:
         assert len(pr_call) >= 1
         assert url == "https://github.com/pr/1"
 
-    def test_no_push_without_flag(self):
-        """Default mode does not push."""
-        from harness.run import push_and_pr
-        # push_and_pr should not be called — this is a control flow test
-        # verified in the main() integration, not here
-        pass
+    def test_no_push_without_flag(self, tmp_path):
+        """push_and_pr is never called when --push is absent."""
+        import sys
+        from unittest.mock import patch, MagicMock
+        from harness.run import WorktreeInfo
+
+        exp_dir = tmp_path / "experiments" / "test_exp"
+        exp_dir.mkdir(parents=True)
+        import yaml
+        (exp_dir / "goal.yaml").write_text(yaml.dump({
+            "objective": "Test",
+            "eval": "eval/",
+            "success_criteria": [{"metric": "test_pass_rate", "threshold": 1.0, "primary": True}],
+        }))
+        (exp_dir / "eval").mkdir()
+        (exp_dir / "eval" / "test_pass.py").write_text("def test_ok(): assert True\n")
+
+        with patch("harness.run.find_experiments_dir", return_value=tmp_path / "experiments"), \
+             patch("harness.run.push_and_pr") as mock_push, \
+             patch("sys.argv", ["harness-run", "test_exp"]):
+            from harness import run as run_module
+            try:
+                run_module.main()
+            except SystemExit:
+                pass
+
+        mock_push.assert_not_called()
 
 
 class TestScaffoldIntegration:
@@ -217,6 +238,18 @@ class TestResolveTargetRepo:
 
         with pytest.raises(FileNotFoundError, match="Target repo not found"):
             resolve_target_repo("nonexistent/foo.py", tmp_path)
+
+    def test_raises_on_path_traversal(self, tmp_path):
+        from harness.run import resolve_target_repo
+
+        with pytest.raises(ValueError, match="Invalid target repo name"):
+            resolve_target_repo("../sibling_repo/some_file.py", tmp_path)
+
+    def test_raises_on_absolute_path(self, tmp_path):
+        from harness.run import resolve_target_repo
+
+        with pytest.raises(ValueError, match="Invalid target repo name"):
+            resolve_target_repo("/etc/passwd", tmp_path)
 
 
 class TestGoalMissingFile:
