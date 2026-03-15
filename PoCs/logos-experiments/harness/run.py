@@ -19,6 +19,8 @@ from harness import find_experiments_dir, find_project_root
 
 logger = logging.getLogger(__name__)
 
+_EVAL_TIMEOUT = int(os.environ.get("HARNESS_EVAL_TIMEOUT", "300"))
+
 
 @dataclass
 class Goal:
@@ -71,7 +73,11 @@ def setup_worktree(
     repo_dir: Optional[Path],
     experiment_name: str,
 ) -> Optional[WorktreeInfo]:
-    """Create a git worktree for an integration experiment."""
+    """Create a git worktree for an integration experiment.
+
+    If the branch already exists, checks it out into the worktree
+    rather than creating a new branch.
+    """
     if repo_dir is None:
         return None
 
@@ -79,11 +85,23 @@ def setup_worktree(
     worktree_path = repo_dir.parent / f".worktrees/{experiment_name}"
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "worktree", "add",
-         "-b", branch_name, str(worktree_path)],
-        check=True, capture_output=True, text=True,
-    )
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "worktree", "add",
+             "-b", branch_name, str(worktree_path)],
+            check=True, capture_output=True, text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        if "already exists" not in (e.stderr or ""):
+            raise
+        # Branch exists from a previous run — reuse it
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "worktree", "add",
+             str(worktree_path), branch_name],
+            check=True, capture_output=True, text=True,
+        )
+        logger.info("Reusing existing branch %s", branch_name)
 
     logger.info("Created worktree at %s (branch: %s)", worktree_path, branch_name)
     return WorktreeInfo(
@@ -107,11 +125,13 @@ def run_eval(
     eval_path: str,
     exp_dir: Path,
     worktree_path: Optional[Path] = None,
+    timeout: int = _EVAL_TIMEOUT,
 ) -> dict:
     """Run the eval and return parsed results.
 
     For integration experiments, adds worktree_path to PYTHONPATH so
-    eval can import real modules.
+    eval can import real modules. Raises subprocess.TimeoutExpired if
+    the eval hangs beyond `timeout` seconds.
     """
     full_eval_path = exp_dir / eval_path
 
@@ -123,7 +143,9 @@ def run_eval(
     cmd = [sys.executable, "-m", "pytest", str(full_eval_path),
            "--tb=short", "-q", "--no-header"]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, env=env, timeout=timeout,
+    )
 
     output = result.stdout + result.stderr
     passed = failed = errors = skipped = 0
@@ -191,7 +213,9 @@ def push_and_pr(
         )
         url = result.stdout.strip()
         logger.info("Created PR: %s", url)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
+        if "already exists" not in (e.stderr or "") and "already exists" not in (e.stdout or ""):
+            raise
         # PR already exists for this branch — fetch the URL
         result = subprocess.run(
             ["gh", "pr", "view", "--json", "url", "-q", ".url"],
@@ -269,23 +293,27 @@ def main():
     print("=" * 60)
     print()
 
-    # TODO: Team dispatch goes here — for now, just run eval
-    print("Running eval...")
-    worktree_path = wt_info.worktree_path if wt_info else None
-    results = run_eval(goal.eval, exp_dir, worktree_path)
+    passed = False
+    try:
+        print("Running eval...")
+        worktree_path = wt_info.worktree_path if wt_info else None
+        results = run_eval(goal.eval, exp_dir, worktree_path)
 
-    for key in ["tests_passed", "tests_failed", "tests_skipped", "tests_total", "pass_rate"]:
-        print(f"[METRIC] {key}={results[key]}")
+        for key in ["tests_passed", "tests_failed", "tests_skipped", "tests_total", "pass_rate"]:
+            print(f"[METRIC] {key}={results[key]}")
 
-    passed = results["pass_rate"] >= 1.0
-    print(f"\n[EVAL] {'PASS' if passed else 'FAIL'}")
+        passed = results["pass_rate"] >= 1.0
+        print(f"\n[EVAL] {'PASS' if passed else 'FAIL'}")
 
-    if args.push and wt_info:
-        if passed:
-            url = push_and_pr(wt_info, args.experiment, results)
-            print(f"\nPR created: {url}")
-        else:
-            print("\nEval failed — not pushing. Fix and re-run with --push.")
+        if args.push and wt_info:
+            if passed:
+                url = push_and_pr(wt_info, args.experiment, results)
+                print(f"\nPR created: {url}")
+            else:
+                print("\nEval failed — not pushing. Fix and re-run with --push.")
+    finally:
+        if wt_info:
+            cleanup_worktree(wt_info.repo_dir, wt_info.worktree_path)
 
     sys.exit(0 if passed else 1)
 

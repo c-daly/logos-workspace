@@ -81,7 +81,7 @@ while true; do
   # Export captured env, cd to workdir, re-run the original command verbatim.
   # CMDLINE is already shell-quoted so eval reconstructs the argv correctly.
   ENV_EXPORTS=$(echo "$ENVIRON" | grep -v '^$' | sed "s/'/'\\\\''/g; s/^/export '/; s/$/'/")
-  RESTART_SCRIPT="cd $(printf '%q' "$WORKDIR"); $ENV_EXPORTS; nohup eval $CMDLINE >/dev/null 2>&1 & echo \$!"
+  RESTART_SCRIPT="cd $(printf '%q' "$WORKDIR"); $ENV_EXPORTS; nohup bash -c "$CMDLINE" >/dev/null 2>&1 & echo \$!"
 
   NEW_PID=$(RUN "$RESTART_SCRIPT" 2>/dev/null || echo "")
 
