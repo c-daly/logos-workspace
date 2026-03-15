@@ -93,7 +93,8 @@ def setup_worktree(
             check=True, capture_output=True, text=True,
         )
     except subprocess.CalledProcessError as e:
-        if "already exists" not in (e.stderr or ""):
+        stderr = e.stderr or ""
+        if "already exists" not in stderr or branch_name not in stderr:
             raise
         # Branch exists from a previous run — reuse it
         subprocess.run(
@@ -150,17 +151,20 @@ def run_eval(
     output = result.stdout + result.stderr
     passed = failed = errors = skipped = 0
 
-    for line in output.splitlines():
-        line = line.strip()
-        if "passed" in line or "failed" in line or "error" in line or "skipped" in line:
-            p = re.search(r'(\d+) passed', line)
-            f = re.search(r'(\d+) failed', line)
-            e = re.search(r'(\d+) error', line)
-            s = re.search(r'(\d+) skipped', line)
-            if p: passed = int(p.group(1))
-            if f: failed = int(f.group(1))
-            if e: errors = int(e.group(1))
-            if s: skipped = int(s.group(1))
+    summary_line = None
+    for line in reversed(output.splitlines()):
+        if re.search(r'\d+ (passed|failed|error|skipped)', line.strip()):
+            summary_line = line.strip()
+            break
+    if summary_line:
+        p = re.search(r'(\d+) passed', summary_line)
+        f = re.search(r'(\d+) failed', summary_line)
+        e = re.search(r'(\d+) error', summary_line)
+        s = re.search(r'(\d+) skipped', summary_line)
+        if p: passed = int(p.group(1))
+        if f: failed = int(f.group(1))
+        if e: errors = int(e.group(1))
+        if s: skipped = int(s.group(1))
 
     total = passed + failed + errors
     pass_rate = passed / total if total > 0 else 0.0
