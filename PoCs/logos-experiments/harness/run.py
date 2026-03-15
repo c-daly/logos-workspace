@@ -138,16 +138,20 @@ def run_eval(
     exp_dir: Path,
     worktree_path: Optional[Path] = None,
     timeout: int = _EVAL_TIMEOUT,
+    environment: Optional[dict] = None,
 ) -> dict:
     """Run the eval and return parsed results.
 
     For integration experiments, adds worktree_path to PYTHONPATH so
-    eval can import real modules. Raises subprocess.TimeoutExpired if
-    the eval hangs beyond `timeout` seconds.
+    eval can import real modules. Applies goal.environment overrides on top
+    of the inherited environment. Raises subprocess.TimeoutExpired if the
+    eval hangs beyond `timeout` seconds.
     """
     full_eval_path = exp_dir / eval_path
 
     env = os.environ.copy()
+    if environment:
+        env.update({str(k): str(v) for k, v in environment.items()})
     if worktree_path:
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = f"{worktree_path}{os.pathsep}{existing}" if existing else str(worktree_path)
@@ -312,7 +316,7 @@ def main():
     try:
         print("Running eval...")
         worktree_path = wt_info.worktree_path if wt_info else None
-        results = run_eval(goal.eval, exp_dir, worktree_path)
+        results = run_eval(goal.eval, exp_dir, worktree_path, environment=goal.environment)
 
         for key in ["tests_passed", "tests_failed", "tests_skipped", "tests_total", "pass_rate"]:
             print(f"[METRIC] {key}={results[key]}")
@@ -322,8 +326,12 @@ def main():
 
         if args.push and wt_info:
             if passed:
-                url = push_and_pr(wt_info, args.experiment, results)
-                print(f"\nPR created: {url}")
+                try:
+                    url = push_and_pr(wt_info, args.experiment, results)
+                    print(f"\nPR created: {url}")
+                except subprocess.CalledProcessError as e:
+                    stderr = (e.stderr or "").strip()
+                    print(f"\n[PUSH] FAILED — {stderr or str(e)}")
             else:
                 print("\nEval failed — not pushing. Fix and re-run with --push.")
     except subprocess.TimeoutExpired:

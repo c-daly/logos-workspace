@@ -153,7 +153,7 @@ class TestEvalExecution:
 
     def test_timeout_raises_cleanly(self, tmp_path):
         """TimeoutExpired propagates from run_eval so main() can catch it cleanly."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from harness.run import run_eval
 
         eval_dir = tmp_path / "eval"
@@ -163,6 +163,27 @@ class TestEvalExecution:
         with patch("harness.run.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=1)):
             with pytest.raises(subprocess.TimeoutExpired):
                 run_eval(eval_path="eval/", exp_dir=tmp_path, worktree_path=None, timeout=1)
+
+    def test_goal_environment_applied(self, tmp_path):
+        """goal.environment variables are injected into the eval subprocess env."""
+        from harness.run import run_eval
+        import os
+
+        eval_dir = tmp_path / "eval"
+        eval_dir.mkdir()
+        (eval_dir / "test_env.py").write_text(
+            "import os\n"
+            "def test_env_var():\n"
+            "    assert os.environ.get('HARNESS_TEST_VAR') == 'hello'\n"
+        )
+
+        result = run_eval(
+            eval_path="eval/",
+            exp_dir=tmp_path,
+            worktree_path=None,
+            environment={"HARNESS_TEST_VAR": "hello"},
+        )
+        assert result["pass_rate"] == 1.0
 
 
 class TestPushFlag:
@@ -197,6 +218,51 @@ class TestPushFlag:
         assert len(push_call) >= 1
         assert len(pr_call) >= 1
         assert url == "https://github.com/pr/1"
+
+    def test_push_failure_prints_clean_message(self, tmp_path, capsys):
+        """A git push failure prints [PUSH] FAILED instead of a raw traceback."""
+        import sys
+        import yaml
+        from unittest.mock import patch
+        from harness.run import WorktreeInfo
+
+        exp_dir = tmp_path / "experiments" / "test_exp"
+        exp_dir.mkdir(parents=True)
+        # Integration experiment so wt_info is populated and push_and_pr is called
+        (exp_dir / "goal.yaml").write_text(yaml.dump({
+            "objective": "Test",
+            "target": "logos/some_file.py",
+            "eval": "eval/",
+            "success_criteria": [{"metric": "test_pass_rate", "threshold": 1.0, "primary": True}],
+        }))
+        (exp_dir / "eval").mkdir()
+        (exp_dir / "eval" / "test_pass.py").write_text("def test_ok(): assert True\n")
+
+        fake_wt = WorktreeInfo(
+            worktree_path=tmp_path / "worktree",
+            branch_name="exp/test_exp",
+            repo_dir=tmp_path / "repo",
+        )
+        push_error = subprocess.CalledProcessError(
+            returncode=128, cmd=["git", "push"],
+            stderr="error: failed to push some refs",
+        )
+
+        with patch("harness.run.find_experiments_dir", return_value=tmp_path / "experiments"), \
+             patch("harness.run.resolve_target_repo", return_value=tmp_path / "repo"), \
+             patch("harness.run.setup_worktree", return_value=fake_wt), \
+             patch("harness.run.cleanup_worktree"), \
+             patch("harness.run.push_and_pr", side_effect=push_error), \
+             patch("sys.argv", ["harness-run", "test_exp", "--push"]):
+            from harness import run as run_module
+            try:
+                run_module.main()
+            except SystemExit:
+                pass
+
+        captured = capsys.readouterr()
+        assert "[PUSH] FAILED" in captured.out
+        assert "Traceback" not in captured.out
 
     def test_no_push_without_flag(self, tmp_path):
         """push_and_pr is never called when --push is absent."""
