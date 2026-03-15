@@ -255,8 +255,12 @@ def create_experiment(name: str, goal: str = "<describe the objective>", target:
         print(f"❌ Experiment '{name}' already exists at {exp_dir}")
         sys.exit(1)
 
-    # Create directories
-    for subdir in ["journal", "eval", "workspace", "checkpoints"]:
+    # Create directories — integration experiments don't need a local workspace/
+    # directory since the agent works directly in the git worktree.
+    subdirs = ["journal", "eval", "checkpoints"]
+    if not target:
+        subdirs.append("workspace")
+    for subdir in subdirs:
         (exp_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Write the ticket
@@ -292,7 +296,10 @@ def create_experiment(name: str, goal: str = "<describe the objective>", target:
 
     print(f"✅ Created: {exp_dir}")
     print(f"   Edit goal.yaml to define the ticket.")
-    print(f"   Edit eval/evaluate.py to define how success is measured.")
+    if target:
+        print(f"   Edit eval/test_integration.py to implement the verification tests.")
+    else:
+        print(f"   Edit eval/evaluate.py to define how success is measured.")
 
 
 def main():

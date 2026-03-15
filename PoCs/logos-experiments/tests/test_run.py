@@ -88,6 +88,32 @@ class TestWorktreeSetup:
         )
         assert "exp/test_exp" in out.stdout
 
+    def test_reuse_branch_cleans_orphaned_directory(self, tmp_path):
+        """When branch exists and an orphaned directory is present, fallback removes it first."""
+        from harness.run import setup_worktree
+
+        repo_dir = tmp_path / "logos"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init", str(repo_dir)], check=True, capture_output=True)
+        (repo_dir / "dummy.py").write_text("x = 1")
+        subprocess.run(["git", "-C", str(repo_dir), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], check=True, capture_output=True)
+
+        # Create the branch manually so it exists
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "branch", "exp/orphan_test"],
+            check=True, capture_output=True,
+        )
+        # Create an orphaned directory at the expected worktree path
+        orphan_path = repo_dir.parent / ".worktrees/orphan_test"
+        orphan_path.mkdir(parents=True)
+        (orphan_path / "leftover.py").write_text("# orphan")
+
+        # setup_worktree should handle this without raising
+        result = setup_worktree(repo_dir=repo_dir, experiment_name="orphan_test")
+        assert result.worktree_path.exists()
+        assert result.branch_name == "exp/orphan_test"
+
     def test_cleanup_skips_dirty_worktree(self, tmp_path):
         """cleanup_worktree warns and skips removal when worktree has uncommitted changes."""
         import logging
@@ -219,6 +245,33 @@ class TestPushFlag:
         assert len(pr_call) >= 1
         assert url == "https://github.com/pr/1"
 
+    def test_push_ignored_for_standalone(self, tmp_path, capsys):
+        """--push on a standalone experiment prints a clear ignored message."""
+        import sys
+        import yaml
+        from unittest.mock import patch
+
+        exp_dir = tmp_path / "experiments" / "test_exp"
+        exp_dir.mkdir(parents=True)
+        (exp_dir / "goal.yaml").write_text(yaml.dump({
+            "objective": "Test",
+            "eval": "eval/",
+            "success_criteria": [{"metric": "test_pass_rate", "threshold": 1.0, "primary": True}],
+        }))
+        (exp_dir / "eval").mkdir()
+        (exp_dir / "eval" / "test_pass.py").write_text("def test_ok(): assert True\n")
+
+        with patch("harness.run.find_experiments_dir", return_value=tmp_path / "experiments"), \
+             patch("sys.argv", ["harness-run", "test_exp", "--push"]):
+            from harness import run as run_module
+            try:
+                run_module.main()
+            except SystemExit:
+                pass
+
+        captured = capsys.readouterr()
+        assert "[PUSH] Ignored" in captured.out
+
     def test_push_failure_prints_clean_message(self, tmp_path, capsys):
         """A git push failure prints [PUSH] FAILED instead of a raw traceback."""
         import sys
@@ -320,6 +373,10 @@ class TestScaffoldIntegration:
         test_text = (exp_dir / "eval" / "test_integration.py").read_text()
         assert "def test_" in test_text, "Scaffolded file must contain a pytest test function"
 
+        # Integration experiments must NOT scaffold a local workspace/ dir
+        assert not (exp_dir / "workspace").exists(), \
+            "Integration experiment must not create workspace/ (agent uses the git worktree)"
+
     def test_new_standalone_no_target(self, tmp_path, monkeypatch):
         """harness-new without --target creates standard goal.yaml."""
         from harness import new as new_module
@@ -367,6 +424,18 @@ class TestResolveTargetRepo:
 
         with pytest.raises(ValueError, match="Invalid target repo name"):
             resolve_target_repo("/etc/passwd", tmp_path)
+
+    @pytest.mark.parametrize("bad_name", [
+        ";rm -rf /",
+        "$HOME",
+        "repo name",
+        ".hidden",
+    ])
+    def test_raises_on_shell_special_chars(self, tmp_path, bad_name):
+        from harness.run import resolve_target_repo
+
+        with pytest.raises(ValueError, match="Invalid target repo name"):
+            resolve_target_repo(f"{bad_name}/some_file.py", tmp_path)
 
 
 class TestEvalPathBoundary:

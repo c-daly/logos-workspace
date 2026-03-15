@@ -96,7 +96,13 @@ def setup_worktree(
         stderr = e.stderr or ""
         if "already exists" not in stderr or branch_name not in stderr:
             raise
-        # Branch exists from a previous run — reuse it
+        # Branch exists from a previous run — reuse it.
+        # Remove any orphaned directory left by a previous crashed run so that
+        # `git worktree add <path> <branch>` does not fail on a non-empty path.
+        if worktree_path.exists():
+            import shutil
+            shutil.rmtree(worktree_path)
+            logger.info("Removed orphaned worktree directory %s", worktree_path)
         subprocess.run(
             ["git", "-C", str(repo_dir), "worktree", "add",
              str(worktree_path), branch_name],
@@ -262,7 +268,9 @@ def resolve_target_repo(target: str, workspace_root: Path) -> Path:
     if not parts:
         raise ValueError(f"Invalid target: {target}")
     repo_name = parts[0]
-    if repo_name in ("..", ".") or Path(repo_name).is_absolute():
+    # Allow only safe identifier-like names: alphanumerics, hyphens, underscores, dots.
+    # Rejects .., ., absolute paths, and names with shell-special chars (;, $, /, space…).
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', repo_name):
         raise ValueError(f"Invalid target repo name '{repo_name}' in target '{target}'")
     repo_dir = workspace_root / repo_name
     try:
@@ -330,7 +338,9 @@ def main():
         passed = results["pass_rate"] >= 1.0
         print(f"\n[EVAL] {'PASS' if passed else 'FAIL'}")
 
-        if args.push and wt_info:
+        if args.push and not wt_info:
+            print("\n[PUSH] Ignored — standalone experiments have no branch to push.")
+        elif args.push and wt_info:
             if passed:
                 try:
                     url = push_and_pr(wt_info, args.experiment, results)
