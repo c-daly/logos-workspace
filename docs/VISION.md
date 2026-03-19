@@ -51,10 +51,13 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 8. **Documentation and testing** — in progress
    Documentation: 13 duplicate ecosystem docs removed, CLAUDE.md consolidated across all 6 repos, SPEC.md updated with Redis/logos_events, READMEs corrected. Testing: suites pass across repos with real infrastructure. Remaining: developer onboarding guide (#135), proposed doc execution (#447), logos coverage improvement, OpenAPI contract tests (#91), standardized test conventions (#420).
 
+9. **Situated cognitive agent** — deferred (prerequisites: Goals 1, 4, 5, 6) (#521)
+   LOGOS operates as a persistent, situated cognitive agent — perceiving, reasoning, learning, and acting across an ecosystem of communication channels and devices. Slack messages, device commands, sensor feeds, and proactive outreach are all uniform from Sophia's perspective: plan actions routed through actuators (Hermes/Apollo for language channels, Talos for hardware). Responses and actions draw on the full HCG, enriched continuously by autonomous KG maintenance, reflection, inference, and entity resolution. A continuously-learning agent generates unbounded data — local deployment is viable for development, but sustained operation requires personal cloud deployment with elastic storage. The optimization target is search/retrieval efficiency; the graph grows without bound and that's the point. Single-user.
+
 ## Non-Goals
 
 - **Text-based intelligence** — LOGOS is explicitly not an LLM wrapper. Language is I/O, not cognition
-- **Production deployment** — focus is on capability development, not scaling or hardening
+- **Production deployment** — focus is on capability development, not multi-user scaling or hardening. Personal cloud deployment for sustained single-user operation (Goal 9) is distinct from productization
 - **Multi-user** — single-operator system for now; auth (#311) is deferred
 - **Real-time hardware** — Talos abstracts hardware but real-time control is out of scope until the cognitive layer is solid
 
