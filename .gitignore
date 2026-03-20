@@ -5,6 +5,8 @@ talos/
 apollo/
 logos/
 
+.worktrees/
+
 .ipynb_checkpoints/
 *log.json
 *.log

@@ -1,0 +1,70 @@
+objective: |
+  Deploy the interim JEPA translator (MLPTranslator, exp_046, R@1=0.382) and
+  expose a /translate_visual endpoint in Hermes. The endpoint accepts raw media
+  (image/video), embeds it via the VisualEmbeddingProvider (hermes #101), runs
+  the MLPTranslator to map V-JEPA tokens (1024-dim) to CLIP space (768-dim),
+  and returns the result. Blocks sophia #76.
+
+  Translator deployment:
+  - Port translator.py and config.py into hermes (not referenced from PoCs)
+  - Store exp_046 architecture config as sidecar JSON alongside checkpoint
+  - Translator loads lazily on first call via build_translator()
+  - Fails fast if checkpoint path missing or corrupt
+  - CPU fallback supported; no hard GPU requirement
+  - Health check reports unhealthy if translator failed to load
+  - Returns HTTP 500 with clear message on inference failure
+
+  Expose POST /translate_visual:
+  - Accepts multipart media upload (image/video)
+  - Embeds via VisualEmbeddingProvider -> V-JEPA tokens (1024-dim)
+  - Translates via MLPTranslator -> CLIP space (768-dim), L2-normalized
+  - Returns {"embedding": [float], "dim": 768, "model": "jepa-v7"}
+  - Update hermes.openapi.yaml with the new endpoint
+
+target: hermes/src/hermes/embedding_provider.py
+
+success_criteria:
+  - metric: test_pass_rate
+    threshold: 1.0
+    primary: true
+    description: All pytest tests in eval/ must pass
+
+  - metric: embedding_dim
+    threshold: 768
+    comparison: "=="
+    description: Output embedding must be exactly 768-dimensional
+
+  - metric: values_finite
+    threshold: 1.0
+    description: All embedding values must be finite (no NaN/Inf)
+
+eval: eval/
+
+context: |
+  Depends on hermes #101 (V-JEPA inference + VisualEmbeddingProvider).
+
+  Hermes uses a pluggable EmbeddingProvider protocol, being refactored into:
+    EmbeddingProvider (base) -> TextEmbeddingProvider, VisualEmbeddingProvider
+
+  The translator is separate from the embedding providers — it maps between
+  embedding spaces (V-JEPA -> CLIP). The endpoint chains:
+    raw media -> VisualEmbeddingProvider (V-JEPA) -> Translator -> CLIP embedding
+
+  Checkpoint: PoCs/vl_jepa/best_r10_exp_046_mlp_ultra_text_min_anchor_sharp_txt_Rat10.382.pt (47M)
+  Architecture: MLPTranslator — 1024-dim V-JEPA input -> 768-dim CLIP output, L2-normalized
+  Interface: translator.py:build_translator(config) handles all architecture types
+
+  Design for replaceability — this endpoint will be swapped when model quality improves.
+
+environment:
+  EMBEDDING_PROVIDER_VISUAL: jepa
+  JEPA_CHECKPOINT_PATH: /home/fearsidhe/projects/LOGOS/PoCs/vl_jepa/best_r10_exp_046_mlp_ultra_text_min_anchor_sharp_txt_Rat10.382.pt
+
+notes: |
+  This is a workflow validation experiment — first real use of the agent-swarm
+  experiment skill against a LOGOS service repo. The goal is both to deliver
+  hermes #100 and to validate the experiment pipeline end-to-end.
+
+  Pre-requisites before eval can run:
+  - poetry install --extras ml (torch is in optional deps)
+  - hermes #101 must be implemented first (VisualEmbeddingProvider)

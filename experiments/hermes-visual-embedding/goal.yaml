@@ -1,0 +1,155 @@
+objective: |
+  Add visual embedding capabilities to Hermes (hermes #101). Three parts:
+
+  1. REFACTOR EMBEDDING PROVIDER HIERARCHY
+
+  Split the existing EmbeddingProvider protocol in embedding_provider.py into:
+
+    EmbeddingProvider (base protocol)
+      - dimension: int (property)
+      - model_name: str (property)
+
+    TextEmbeddingProvider(EmbeddingProvider)
+      - embed(text: str) -> list[float]
+      - embed_batch(texts: list[str]) -> list[list[float]]
+
+    VisualEmbeddingProvider(EmbeddingProvider)
+      - embed(media: bytes, media_type: str) -> list[float]
+      - embed_batch(media_list: list[bytes], media_type: str) -> list[list[float]]
+
+  Move SentenceTransformerProvider and OpenAIEmbeddingProvider to implement
+  TextEmbeddingProvider. All existing text embedding functionality must
+  continue working exactly as before. The singleton accessor
+  get_embedding_provider() continues to return a TextEmbeddingProvider.
+
+  2. ADD V-JEPA VISUAL EMBEDDING PROVIDER
+
+  Implement JEPAVisualProvider that implements VisualEmbeddingProvider:
+  - Loads pretrained V-JEPA ViT-H/14 weights from Meta's public release
+  - Downloads weights automatically if JEPA_WEIGHTS_PATH does not exist
+  - Extracts temporal token embeddings from input media
+  - Mean-pools tokens to produce a single 1024-dim embedding per input
+  - Activated by EMBEDDING_PROVIDER_VISUAL=jepa + JEPA_WEIGHTS_PATH env vars
+  - Lazy model loading on first call
+  - CPU fallback supported (JEPA_DEVICE env var, default: cpu)
+  - OTel metrics: inference count, latency, model load time
+
+  V-JEPA is Meta's pretrained model — load it with torch and run forward
+  passes. No custom inference code needed. For image input, treat as
+  single-frame video.
+
+  3. ADD CLIP VISUAL EMBEDDING PROVIDER
+
+  Implement CLIPVisualProvider that implements VisualEmbeddingProvider:
+  - Uses the open_clip or clip package to load CLIP ViT-L/14
+  - Produces 768-dim embeddings from images/video frames
+  - Activated by EMBEDDING_PROVIDER_VISUAL=clip
+  - Same lazy loading, CPU fallback, OTel metrics pattern
+
+  4. EXPOSE /embed_visual ENDPOINT
+
+  POST /embed_visual accepts multipart media upload (image or video).
+  Returns embeddings from all configured visual providers:
+
+    {
+      "embeddings": {
+        "jepa": {"embedding": [float], "dim": 1024, "model": "vjepa-vit-h14"},
+        "clip": {"embedding": [float], "dim": 768, "model": "clip-vit-l14"}
+      },
+      "media_type": "image/png"
+    }
+
+  If only one provider is configured, only that provider's embedding is
+  returned. The endpoint is stateless — no Milvus writes, no side effects.
+
+  Health check (/health) should report visual provider status.
+
+  5. UPDATE setup-local-dev.sh
+
+  Add a step to download V-JEPA ViT-H/14 weights if not present at
+  JEPA_WEIGHTS_PATH. CLIP weights are handled by the clip package
+  automatically.
+
+  6. UPDATE hermes.openapi.yaml
+
+  Add the /embed_visual endpoint spec.
+
+target: hermes/src/hermes/embedding_provider.py
+
+success_criteria:
+  - metric: test_pass_rate
+    threshold: 1.0
+    primary: true
+    description: All pytest tests in eval/ must pass
+
+  - metric: text_embedding_unchanged
+    threshold: 1.0
+    description: Existing text embedding tests still pass after refactor
+
+  - metric: jepa_embedding_dim
+    threshold: 1024
+    comparison: "=="
+    description: V-JEPA embedding must be 1024-dimensional
+
+  - metric: clip_embedding_dim
+    threshold: 768
+    comparison: "=="
+    description: CLIP embedding must be 768-dimensional
+
+  - metric: values_finite
+    threshold: 1.0
+    description: All embedding values must be finite
+
+eval: eval/
+
+context: |
+  Hermes is the stateless language and embedding service for LOGOS. It
+  currently supports text embeddings via SentenceTransformerProvider and
+  OpenAIEmbeddingProvider, selected by EMBEDDING_PROVIDER env var.
+
+  The EmbeddingProvider protocol lives in src/hermes/embedding_provider.py.
+  It defines: dimension (property), model_name (property), embed(text),
+  embed_batch(texts). There is a lazy singleton via get_embedding_provider().
+
+  Existing tests are in tests/. The conftest.py has a _force_local_providers
+  fixture that sets EMBEDDING_PROVIDER=sentence-transformers for tests.
+
+  Hermes uses FastAPI, runs on port 17000. The main app is in main.py.
+  Dev startup: scripts/dev.sh (installs --extras ml, starts uvicorn).
+
+  V-JEPA ViT-H/14 is Meta's publicly available pretrained model. Load it
+  with torch, run forward pass on preprocessed frames, get token embeddings.
+
+  CLIP ViT-L/14 is available via the clip or open_clip package. Load model,
+  preprocess image, run forward pass, get embedding.
+
+  pymilvus is a dependency but the new endpoint must NOT write to Milvus.
+  Hermes is stateless — produce embeddings, return them, done.
+
+  sophia currently has a JEPA stub backend (sophia.jepa) that generates
+  fake embeddings. That will be replaced by calls to this hermes endpoint
+  in a future sophia ticket. Do not modify sophia.
+
+environment:
+  EMBEDDING_PROVIDER: sentence-transformers
+  EMBEDDING_PROVIDER_VISUAL: jepa
+  JEPA_DEVICE: cuda:0
+
+notes: |
+  This is the first step toward the universal embedding layer (see
+  docs/plans/2026-03-06-universal-embedding-layer-design.md). The universal
+  model will eventually replace separate V-JEPA and CLIP providers with a
+  single multi-head autoencoder whose shared trunk IS the embedding space.
+
+  For now, deploy V-JEPA and CLIP as separate providers. The /embed_visual
+  endpoint returns both, and consumers decide which to use.
+
+  Existing text embedding functionality MUST NOT break. Run the existing
+  hermes test suite as part of validation.
+
+  hermes #100 (translator deployment) depends on this but may be superseded
+  by the universal embedding model. Don't worry about #100 here.
+
+  Pre-requisites:
+  - poetry install --extras ml (torch is in optional deps, needed for V-JEPA)
+  - pip install open-clip-torch (or clip) for CLIP visual embeddings
