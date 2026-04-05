@@ -1,94 +1,53 @@
 # LOGOS Project Status
 
-**Generated:** 2026-03-18
+**Generated:** 2026-04-05
+**Previous update:** 2026-03-18
 **Foundry Version:** v0.7.0 (all repos at v0.7.0)
 
 ---
 
-## Recent Work (since last status: Mar 18)
+## What Changed Since March 18
 
-### Hermes PR #102 merged -- V-JEPA inference and VisualEmbeddingProvider (2026-03-18)
+**Short answer: almost nothing.** The project has been on pause since ~March 18 due to the user starting a new job. Three issues were filed (two on March 18, one on March 23), one issue was closed (hermes #101, same day as last status), and logos-workspace #5 was closed. No PRs opened, no PRs merged, no commits landed in any service repo. The workspace repo received two documentation commits (vision doc, gitignore updates).
 
-Hermes #101 is closed. PR #102 (`feat/101-visual-embedding-provider`) landed V-JEPA inference and the `VisualEmbeddingProvider` protocol in Hermes. This is a significant milestone for grounded perception.
+### Issues Created Since March 18
+- **logos #522** (2026-03-18): fix: robust ML container builds for downstream services (PyTorch CPU index) -- unlabeled
+- **logos #523** (2026-03-23): Update LOGOS ticket templates to be compatible with experiment goal.yaml format -- component:logos
+- **hermes #103** (2026-03-18): fix: restructure ML extras and harden publish-ml build -- unlabeled
 
-**What shipped (17 files, +2244/-482):**
-- **Protocol refactor**: `EmbeddingProvider` split into base + `TextEmbeddingProvider` + `VisualEmbeddingProvider`. Existing text providers unchanged.
-- **JEPAVisualProvider**: V-JEPA ViT-H/14, 1024-dim embeddings, lazy model loading (torch hub with local weights fallback), CPU fallback, `JEPA_DEVICE`/`JEPA_DTYPE` env vars, OTel metrics.
-- **CLIPVisualProvider**: CLIP ViT-L/14 via open_clip, 768-dim embeddings, lazy loading, batch inference, OTel metrics.
-- **`POST /embed_visual` endpoint**: File upload to embeddings from all configured visual providers, OTel tracing, 16MB file size validation, 503 if no providers configured.
-- **Health check**: Reports available visual providers in capabilities.
-- **Dependencies**: Added `torchvision`, `open-clip-torch` to `[ml]` extras.
-- **Tests**: 27 tests (11 JEPA, 9 CLIP, 7 endpoint), all passing.
+### Issues Closed Since March 18
+- **hermes #101** (closed 2026-03-18): [hermes] Add V-JEPA inference and VisualEmbeddingProvider -- closed via PR #102 (already tracked in previous status)
+- **logos-workspace #5** (closed 2026-03-18): Autonomous experiment loop -- closed after engine moved to agent-swarm
 
-**Unblocks:** hermes #100 (deploy interim JEPA translator as `/translate_visual` endpoint), which depends on the `VisualEmbeddingProvider` from #101. #100 is now the next Hermes pick.
+### PRs Merged Since March 18
+None.
 
-### Experimentation engine moved to agent-swarm (2026-03-17)
+### Open PRs
+None across any repository.
 
-The generic experiment execution engine (worktree management, eval orchestration, push-and-PR flow) has moved out of logos-workspace into agent-swarm as a reusable Claude Code skill (`agent-swarm:experiment`). LOGOS keeps experiment definitions (goal.yaml files, eval suites) in-repo. Workspace issue #5 (autonomous experiment loop) needs reassessment -- the ticket-driven iterative part is now an agent-swarm capability.
-
-### Priority decisions (2026-03-17)
-
-- **Entity resolution (#503)** confirmed as next implementation pick. Fully designed, 7-task TDD plan ready.
-- **JEPA translator deployment approved** at current metrics (R@1=0.382). Proceed with hermes #100 as interim deployment.
-- **Experiment definitions stay in LOGOS** -- goal.yaml and eval suites are LOGOS-specific content.
-
-### logos-workspace PR #7 merged (2026-03-15)
-
-The `harness-run` command landed. Experiment lifecycle orchestration on real git worktrees: loads `goal.yaml`, creates a worktree on the target repo, runs the eval suite, optionally pushes a branch and opens a PR with results. Engine subsequently moved to agent-swarm.
-
-### logos-workspace PR #4 merged (2026-03-14)
-
-V-JEPA token-grid PoC with autonomous hyperparameter search. 80+ experiments translating V-JEPA temporal tokens into CLIP space. Best txt_R@1 = 0.371 (target 0.42).
-
-**Issues filed Mar 15:**
-- **hermes #100** -- Deploy interim JEPA translator (`MLPTranslator`, exp_046, R@1=0.382) as `/embed_visual` endpoint. Approved for deployment at current metrics.
-- **sophia #142** -- Fix `/feedback` delivery and implement minimal confidence update. Sub-issue of logos #499 epic.
-
-**V-JEPA artifacts pulled locally** (2026-03-15): 19 checkpoints, 10 notebooks, 53 run logs from Mar 12-14 now in `PoCs/vl_jepa/`. Best checkpoint: `exp_046` (MLPTranslator, 47M, R@1=0.382). Known ceiling: ~0.382 across 75 experiments.
-
-**logos #500 (Redis centralization):** Confirmed closed 2026-03-04. logos #501 (Ontology pub/sub) in-progress, updated 2026-03-14.
-
-**logos #469 (Centralize Redis infrastructure):** Confirmed closed 2026-03-14. Core Redis work completed via #500/#512.
+### Commits Since March 18
+- **logos-workspace** (2 commits): `d741ca8` docs and gitignore, `9b8b084` vision doc
+- **logos, sophia, hermes, talos, apollo**: No commits since March 18.
 
 ---
 
-## Previous Recent Work (since Mar 4)
+## Open Issue Summary
 
-The past 10 days shifted from infrastructure blitz to research and design. No service-repo code changes landed -- all energy went into the V-JEPA translator PoC and design documentation for upcoming cognitive loop work.
-
-### 1. V-JEPA Token-Grid PoC (Mar 5-13)
-
-Major research effort in logos-workspace. End-to-end PoC for translating V-JEPA temporal token embeddings into CLIP space, with an autonomous LLM-guided hyperparameter search system.
-
-- **logos-workspace PR #4** (MERGED 2026-03-14): V-JEPA token-grid PoC with autonomous hyperparameter search
-- Token-level V-JEPA embeddings `(B, 32, 1024)` -- 32 temporal tokens per video, no mean-pooling
-- Translator architectures tested: linear, MLP, residual, transformer, multi-stage pipelines
-- Loss functions: MSE, cosine, InfoNCE (false-negative masked), mixed targets
-- Autonomous search via `coordinator.py` using gpt-5.4 for LLM-guided config generation
-- **Best result:** `txt_R@1 = 0.371` (target: 0.42), `img_R@5 = 0.944`
-- 80+ experiments across 15+ rounds on MSR-VTT
-- Key finding: InfoNCE is the viable retrieval loss; vanilla contrastive causes training collapse
-
-This directly informs the universal embedding layer design and unblocks decisions about JEPA-to-CLIP translation feasibility.
-
-### 2. Design Documentation (Mar 5-10)
-
-Three design documents landed in the workspace:
-
-- **Ontology evolution design** (logos-workspace PR #3, merged Mar 5): Design for emergent type discovery in the knowledge graph
-- **Entity resolution design** (`docs/plans/2026-03-06-entity-resolution-design.md`): Non-linguistic alias detection via cosine triage + hypothesis accumulation
-- **Entity resolution implementation plan** (`docs/plans/2026-03-06-entity-resolution-plan.md`): 7 TDD tasks spanning hermes and sophia, ready to execute
-- **Universal embedding layer design** (`docs/plans/2026-03-06-universal-embedding-layer-design.md`): Multi-head autoencoder architecture -- JEPA/CLIP/text input heads, shared trunk whose internal representation IS the universal space
-
-### 3. Service-Repo Changes
-
-logos, sophia, talos, and apollo have had no new commits or merged PRs since the March 4 infrastructure blitz (aside from hermes PR #102, merged 2026-03-18). The previous session's ~25 PRs are fully settled.
+| Repo | Open Issues | Change from Mar 18 |
+|------|-------------|---------------------|
+| logos | 44 | +2 (new: #522, #523; hermes issues tracked in logos) |
+| sophia | 3 | -- |
+| hermes | 2 | +1 (new: #103; #101 closed) |
+| talos | 1 | -- |
+| apollo | 0 | -- |
+| logos-workspace | 0 | -- (was already 0; #5 closed Mar 18) |
+| **Total** | **50** | **+2 net** |
 
 ---
 
 ## In Flight
 
-No open PRs across any repository.
+Nothing. No open PRs, no branches with uncommitted work, no active implementation across any repo.
 
 ---
 
@@ -99,31 +58,21 @@ No open PRs across any repository.
 | #464 | logos | Update M3 planning tests for flexible ontology | #460, #461 (upstream ontology work) |
 | #463 | logos | Validate M4 demo end-to-end with flexible ontology | #460, #461 (upstream ontology work) |
 
+No change from previous status.
+
 ---
 
-## Open Issue Summary
+## Open Issues by Repo
 
-| Repo | Open Issues |
-|------|-------------|
-| logos | 43 |
-| sophia | 3 |
-| hermes | 1 |
-| talos | 1 |
-| apollo | 0 |
-| logos-workspace | 0 |
-| **Total** | **48** |
-
-Issues opened since March 4: logos #521, hermes #100, hermes #101, sophia #142. Hermes #101 closed via PR #102 (2026-03-18). sophia #76 closed (work migrated to Hermes). logos-workspace #5 closed (engine moved to agent-swarm).
-
-### logos -- open issues (43)
+### logos -- 44 open issues
 
 **KG Maintenance epic (#499, status:in-progress, priority:high):**
-- #501: Ontology Pub/Sub Distribution (priority:high) -- infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
-- #503: Entity Resolution -- Alias Detection and Merging (priority:high) -- design + implementation plan ready, not yet started
-- #504: Type Correction -- Centroid-Based Reclassification (priority:medium)
-- #505: Ontology Evolution -- Emergent Type Discovery (priority:medium) -- design doc landed
-- #506: Relationship Inference -- Taxonomic Scaffolding and Missing Edges (priority:medium)
-- #507: Competing Edges & Confidence Model (priority:medium)
+- #501: Ontology Pub/Sub Distribution (priority:high, status:in-progress) -- infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
+- #503: Entity Resolution -- Alias Detection and Merging (priority:high, status:todo) -- full design + 7-task TDD plan ready, not yet started
+- #504: Type Correction -- Centroid-Based Reclassification (priority:medium, status:todo)
+- #505: Ontology Evolution -- Emergent Type Discovery (priority:medium, status:todo) -- design doc exists
+- #506: Relationship Inference -- Taxonomic Scaffolding and Missing Edges (priority:medium, status:todo)
+- #507: Competing Edges & Confidence Model (priority:medium, status:todo)
 - #508: Maintenance Scheduler -- When and How Jobs Run (priority:medium, status:in-progress) -- scheduler framework landed in sophia #137
 
 **Learning & Memory epic (#415, priority:high):**
@@ -138,8 +87,8 @@ Issues opened since March 4: logos #521, hermes #100, hermes #101, sophia #142. 
 - #460: Update sophia planner for flexible ontology (priority:medium)
 - #461: Update downstream repos for flexible ontology (priority:medium)
 - #462: Update pick-and-place test data for flexible ontology (priority:medium)
-- #463: Validate M4 demo end-to-end (priority:medium, blocked)
-- #464: Update M3 planning tests (priority:medium, blocked)
+- #463: Validate M4 demo end-to-end (priority:medium, status:blocked)
+- #464: Update M3 planning tests (priority:medium, status:blocked)
 - #465: Implement capability catalog in flexible ontology (priority:medium)
 
 **OTel/Observability:**
@@ -154,8 +103,12 @@ Issues opened since March 4: logos #521, hermes #100, hermes #101, sophia #142. 
 - #265: CWM-E reflection worker (priority:medium)
 - #267: Persona diary UI components (priority:medium)
 
-**Infrastructure & Other:**
-- #521: Situated Cognitive Agent -- Persistent Operation, Communication Channels, Device Ecosystem (priority:low, NEW)
+**Infrastructure & Build (NEW since last status):**
+- #522: Robust ML container builds for downstream services (PyTorch CPU index) -- NEW, unlabeled
+- #523: Update LOGOS ticket templates for experiment goal.yaml format -- NEW, component:logos
+
+**Infrastructure & Other (existing):**
+- #521: Situated Cognitive Agent -- Persistent Operation, Communication Channels, Device Ecosystem (priority:low)
 - #515: Migrate type_definition nodes from fabricated type_* IDs to real UUIDs
 - #498: PM agent: detect undocumented new functionality during status updates
 - #496: Consolidate CWM modules into HCG ontology types (priority:high)
@@ -163,7 +116,6 @@ Issues opened since March 4: logos #521, hermes #100, hermes #101, sophia #142. 
 - #447: Documentation consolidation (priority:medium)
 - #433: Standardize LOGOS repos
 - #420: Standardize testing infrastructure
-- #416: Testing Sanity -- prerequisite to learning & memory work (priority:critical)
 - #409: Standardize developer scripts
 - #403: Deprecate planner_stub in favor of HCGPlanner
 - #311: [Apollo] Implement Authentication and Authorization (priority:high, deferred per non-goals)
@@ -171,52 +123,45 @@ Issues opened since March 4: logos #521, hermes #100, hermes #101, sophia #142. 
 - #135: Developer onboarding guide (priority:medium)
 - #91: Add OpenAPI validation tests (priority:high)
 
-### sophia -- open issues (3)
+### sophia -- 3 open issues
 - #142: Fix /feedback delivery and implement minimal confidence update (priority:high)
 - #101: Define session boundaries and ephemeral node lifecycle (priority:medium)
 - #20: Extend HCG + Executor to support general tool actions (priority:medium)
 
-### hermes -- open issues (1)
+### hermes -- 2 open issues
+- #103: Restructure ML extras and harden publish-ml build -- NEW, unlabeled
 - #100: Deploy interim JEPA translator as /embed_visual endpoint (priority:high)
 
-### talos -- open issues (1)
+### talos -- 1 open issue
 - #31: Add coverage reporting and audit skip conditions
 
-### apollo -- open issues (0)
-None.
+### apollo -- 0 open issues
 
-### logos-workspace -- open issues (0)
-None.
+### logos-workspace -- 0 open issues
 
 ---
 
 ## Progress Against Vision Goals
 
-### 1. Complete the cognitive loop -- INFRASTRUCTURE READY, NEXT STORIES DESIGNED
+### 1. Complete the cognitive loop -- STALLED (was: infrastructure ready)
 
-The infrastructure phase completed March 4 (Redis event bus, ontology pub/sub, maintenance scheduler). Since then, the focus shifted to designing the next layer of cognitive loop work. Entity resolution (#503) has both a design doc and a 7-task TDD implementation plan ready to execute. Ontology evolution (#505) has a design doc. No implementation code has landed in the 10 days since -- the service repos are waiting for these designs to be picked up.
+No implementation work since March 18. Entity resolution (#503) still has its full design + 7-task TDD plan ready to execute but nobody has picked it up. The KG maintenance epic (#499) and its sub-stories (#503-508) are all in the same state they were 18 days ago. Feedback processing (sophia #142) untouched. This was the declared top priority.
 
-**Ready to execute:** Entity resolution (#503)
+**Ready to execute:** Entity resolution (#503) -- design doc + implementation plan exist
 **Designed but not planned:** Ontology evolution (#505)
 **Still needs design:** Feedback processing, type correction (#504), relationship inference (#506)
 
-### 2. Grounded perception via JEPA -- BUILDING
+### 2. Grounded perception via JEPA -- STALLED (was: building)
 
-Hermes #101 (V-JEPA inference + VisualEmbeddingProvider) merged 2026-03-18 via PR #102. Hermes now has both JEPAVisualProvider (V-JEPA ViT-H/14, 1024-dim) and CLIPVisualProvider (CLIP ViT-L/14, 768-dim) with a `POST /embed_visual` endpoint. 27 tests passing.
+Hermes #101 (V-JEPA inference + VisualEmbeddingProvider) merged March 18 -- the last code change to land anywhere. Hermes #100 (deploy interim JEPA translator as `/translate_visual`) remains the next pick but has not been started. Two new build-related issues were filed (logos #522, hermes #103) for ML container/packaging problems discovered during the #101 work, suggesting there are unresolved build issues that would need attention before #100 can ship cleanly.
 
-**Next:** hermes #100 (deploy interim JEPA translator as `/translate_visual`) is now unblocked. This will port the MLPTranslator (exp_046, R@1=0.382) from the PoC into Hermes, completing the V-JEPA-to-CLIP translation pipeline.
+### 3. Flexible ontology -- STALLED (no change since Mar 2)
 
-sophia #76 (JEPA PoC backend) closed -- work migrated to Hermes.
-
-The V-JEPA token-grid PoC (logos-workspace PR #4, merged 2026-03-14) provided the research foundation. Best txt_R@1 = 0.371 against a 0.42 target.
-
-### 3. Flexible ontology -- STALLED
-
-No new work since ontology hierarchy restructure (#510) merged March 2. Downstream cleanup issues (#458-465) remain open. #464 and #463 are still blocked on #460/#461. Type_definition UUID migration (#515) untouched. The reified model is implemented but downstream propagation has stalled for 16 days.
+No movement. Downstream cleanup issues (#458-465) remain open. #464 and #463 still blocked on #460/#461. Type_definition UUID migration (#515) untouched. The reified model is implemented but downstream propagation has stalled for 34 days.
 
 ### 4. Memory and learning -- NOT STARTED
 
-No change. Epic #415 and stories (#411-414) still waiting. Testing sanity (#416, priority:critical) remains the prerequisite. The Redis/event infrastructure that landed March 4 provides the foundation, but no implementation work has begun.
+No change. Epic #415 and stories (#411-414) still waiting. Testing sanity (#416, priority:critical) remains the prerequisite.
 
 ### 5. Planning and execution -- PAUSED
 
@@ -226,41 +171,66 @@ No change. Planner stub deprecation (#403) still open. Still blocked on flexible
 
 No change. Correctly deprioritized.
 
-### 7. Infrastructure and observability -- STABLE
+### 7. Infrastructure and observability -- STABLE, new build issues surfaced
 
-No new infrastructure work since March 4. The CI discipline tooling, version pinning, and Redis infrastructure from that session remain the current state. Apollo OTel issues are now confirmed closed (#340, #341, #342). Remaining gaps: endpoint-level spans for Sophia (#335) and Hermes (#338), cross-service testing (#321), and Hermes OTel documentation (#339).
+No new infrastructure work. Two new issues surfaced around ML container builds: logos #522 (PyTorch CPU index for downstream services) and hermes #103 (ML extras restructuring). These were discovered during the hermes PR #102 work and filed March 18 but not yet addressed. They may affect the ability to ship hermes #100 (JEPA translator deployment).
 
-### 8. Documentation and testing -- DESIGN DOCS ACTIVE
+OTel gaps unchanged: endpoint-level spans for Sophia (#335) and Hermes (#338), cross-service testing (#321), Hermes OTel docs (#339).
 
-Three design docs landed in the workspace (entity resolution, universal embedding layer, ontology evolution). Service-level documentation unchanged. Testing gaps (#416, #420, #91) still open.
+### 8. Documentation and testing -- MINOR UPDATES
+
+Two workspace commits landed (vision doc updates, gitignore). logos #523 filed to align ticket templates with experiment goal.yaml format. Otherwise no change. Testing gaps (#416, #420, #91) still open.
 
 ---
 
 ## Stale / Drift
 
-**Stale issues (>30 days no activity):**
-None.
+**Stale issues (>30 days no activity as of April 5):**
+
+Nearly everything is stale. With the project paused since March 18, all issues that were not updated in the last session are now 30+ days without activity. The most concerning:
+
+| Issue | Repo | Last Activity | Days Stale |
+|-------|------|---------------|------------|
+| #20 | sophia | 2026-02-28 | 36 |
+| #31 | talos | 2026-02-28 | 36 |
+| #91 | logos | 2026-02-28 | 36 |
+| #135 | logos | 2026-02-28 | 36 |
+| #246-267 | logos | 2026-02-28 | 36 |
+| #311-339 | logos | 2026-02-28 | 36 |
+| #403-420 | logos | 2026-02-28 | 36 |
+| #433-465 | logos | 2026-02-28 | 36 |
+| #481 | logos | 2026-02-28 | 36 |
+| #496-498 | logos | 2026-02-28 - 03-04 | 32-36 |
+| #504-508 | logos | 2026-03-01 - 03-14 | 22-35 |
+| #515 | logos | 2026-03-04 | 32 |
+| #101 | sophia | 2026-03-01 | 35 |
+
+This is expected given the pause. No action needed unless the user wants to triage/close some of the older issues.
 
 **Potential closures (review with user):**
-- logos #501 (Ontology Pub/Sub Distribution): Significant implementation landed (sophia #136, hermes #95). Review remaining scope.
-- logos #508 (Maintenance Scheduler): Core scheduler framework landed in sophia #137. Review remaining scope.
+- logos #501 (Ontology Pub/Sub Distribution): Significant implementation landed (sophia #136, hermes #95). Still marked in-progress -- review remaining scope.
+- logos #508 (Maintenance Scheduler): Core scheduler framework landed in sophia #137. Still marked in-progress -- review remaining scope.
+- logos #498 (PM agent: detect undocumented new functionality): This meta-tooling request may have been superseded by the PM agent skill in agent-swarm.
 
-**Reconciliation corrections applied in this update:**
-- logos-workspace PR #4: Was listed as OPEN, actually merged 2026-03-14. Fixed.
-- logos #469 (Centralize Redis infrastructure): Was listed as "candidate for closure", actually already closed 2026-03-14. Removed from open list.
-- logos #340, #341, #342 (Apollo OTel): Were referenced as open gaps in OTel section. All three are closed. Fixed.
-- logos issue count: Was 30, actual is 43. Corrected. The previous count likely missed issues without component labels.
-- logos #521 (Situated Cognitive Agent): New issue from 2026-03-17, not previously tracked. Added.
-- "In Flight" table: Cleared. No open PRs exist across any repo.
+**New issues needing labels:**
+- logos #522: No labels. Should have component, priority, type labels.
+- logos #515: No labels. Should have component, domain, type labels.
+- hermes #103: No labels. Should have component, priority, type labels.
+
+**Status label drift:**
+- logos #501 and #508 are marked `status:in-progress` but have had no activity in 22-35 days. These should either be actively worked or moved to `status:todo`.
 
 ---
 
 ## Observations
 
-**The project is in a design-then-build transition.** The March 4 infrastructure blitz created the foundation. The past two weeks produced design docs, research results, and the VisualEmbeddingProvider in Hermes. The service repos are now waiting for implementation work to resume, particularly entity resolution (#503).
+**The project is paused, not abandoned.** Everything is exactly where it was left on March 18. No regressions, no drift in the codebase itself. The backlog is intact, designs are still valid, and the implementation plans have not rotted. This is a clean pause point.
 
-**Entity resolution (#503) is the most ready-to-execute story.** Full design + 7-task TDD implementation plan. This is the natural next pick for coding work.
+**Resumption priorities are clear.** When work resumes, the previous priorities still hold:
+1. **Entity resolution (#503)** -- full design + 7-task TDD plan ready to execute. This is the most shovel-ready work item.
+2. **Hermes #100 (JEPA translator deployment)** -- but check logos #522 and hermes #103 first. ML container build issues may need resolution before this can ship.
+3. **Flexible ontology downstream (#460, #461)** -- still blocking the planning track and two other issues.
 
-**Hermes #100 (JEPA translator deployment) is unblocked.** With the VisualEmbeddingProvider merged, the translator can now be deployed as an interim endpoint.
+**Three unlabeled issues need triage.** logos #522, logos #515, and hermes #103 were filed without full labels. A quick labeling pass would keep the backlog clean.
 
-**Flexible ontology has stalled for over two weeks.** Downstream propagation (#460, #461) is blocking both the ontology track and planning work (#403). This may warrant a priority bump.
+**The 18-day gap has pushed most issues past the 30-day stale threshold.** This is cosmetic -- the issues are not actually stale in the sense of being forgotten. But if the pause continues significantly longer, it would be worth reviewing whether any priorities have shifted.
