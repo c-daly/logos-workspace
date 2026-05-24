@@ -2,6 +2,13 @@
 
 This guide takes you from a fresh machine to a running LOGOS stack.
 
+> **Automated path:** after cloning this workspace, run `./bootstrap.sh` — it
+> installs the toolchain, pins every repo to Python 3.12, installs deps, builds
+> the webapp SDKs, scaffolds `.env` files, and pulls the infra images. It is
+> idempotent (safe to re-run) and does everything below except start services
+> (use `apollo/scripts/run_apollo.sh` for that). The manual steps below remain
+> as reference and for non-standard setups.
+
 ## Prerequisites
 
 Install these before starting:
