@@ -493,7 +493,7 @@ git commit -m "feat(bootstrap): build vendored SDKs + webapp deps"
 
 ---
 
-### Task 8: `.env` scaffolding + infra image prep + summary, then wire `main`
+### Task 8: Config distribution (run logos scripts) + infra image prep + summary, then wire `main`
 
 **Files:**
 - Modify: `logos-workspace/bootstrap.sh`
@@ -501,18 +501,29 @@ git commit -m "feat(bootstrap): build vendored SDKs + webapp deps"
 - [ ] **Step 1: Add the functions**
 
 ```bash
-# --- .env scaffolding ------------------------------------------------------
-# Copy each .env.example -> .env only when absent. Never overwrite (idempotent
-# and safe for real secrets). Warn about values the user must fill.
-setup_env_files() {
-  local r ex env
-  for r in $REPOS; do
-    ex="$WORKSPACE_ROOT/$r/.env.example"; env="$WORKSPACE_ROOT/$r/.env"
-    [ -f "$ex" ] || continue
-    if [ -f "$env" ]; then log_ok "$r/.env present"
-    else cp "$ex" "$env"; log_info "$r/.env created from example"; fi
-  done
-  log_warn "Fill real secrets where needed (e.g. HERMES_LLM_API_KEY / OPENAI_API_KEY)."
+# --- config: delegate to logos --------------------------------------------
+# logos owns config distribution. render_test_stacks.py stamps each repo's
+# .env.test + docker-compose.test.yml IN PLACE (its --output-root defaults to
+# each repo's path; ports injected from logos_config). We do NOT hand-roll
+# .env copying. We only provision the one genuine local secret the dev stack
+# needs: OPENAI_API_KEY (read by run_apollo.sh from apollo/.env). Idempotent.
+distribute_config() {
+  log_info "rendering ecosystem config via logos (writes .env.test + compose into each repo)…"
+  ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py )
+  log_ok "config rendered (ports from logos_config; 'render_test_stacks.py --check' guards drift)"
+  ensure_openai_secret
+}
+
+# Ensure apollo/.env carries the OPENAI_API_KEY line; never overwrite a real value.
+ensure_openai_secret() {
+  local f="$WORKSPACE_ROOT/apollo/.env"
+  if [ -f "$f" ] && grep -qE '^OPENAI_API_KEY=.+' "$f"; then
+    log_ok "OPENAI_API_KEY set"
+    return
+  fi
+  [ -f "$f" ] || : > "$f"
+  grep -qE '^OPENAI_API_KEY=' "$f" || printf 'OPENAI_API_KEY=\n' >> "$f"
+  log_warn "Set OPENAI_API_KEY in apollo/.env (required for Hermes LLM)."
 }
 
 # --- infra (prep only) -----------------------------------------------------
@@ -544,7 +555,7 @@ summary() {
 - [ ] **Step 2: Wire into `main`** (after `setup_webapp`)
 
 ```bash
-  setup_env_files
+  distribute_config
   setup_infra
   summary
 ```
@@ -552,13 +563,13 @@ summary() {
 - [ ] **Step 3: Lint + full run**
 
 Run: `shellcheck bootstrap.sh && ./bootstrap.sh`
-Expected: `.env` files reported present/created; infra images pulled; summary block prints uv/poetry/python/node + each repo on Python 3.12. Exit 0.
+Expected: logos render runs and writes each repo's `.env.test`/compose; `OPENAI_API_KEY` reported set or warned; infra images pulled; summary block prints uv/poetry/python/node + each repo on Python 3.12. Exit 0.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add bootstrap.sh
-git commit -m "feat(bootstrap): .env scaffolding, infra image prep, summary"
+git commit -m "feat(bootstrap): delegate config to logos render, infra image prep, summary"
 ```
 
 ---

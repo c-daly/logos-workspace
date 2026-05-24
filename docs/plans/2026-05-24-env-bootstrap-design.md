@@ -44,9 +44,11 @@ The script reads top-to-bottom as this narrative; each phase is guarded for idem
 5. **Repos** — clone any missing sibling repo from `git@github.com:c-daly/<repo>.git`; if the dir already exists, leave it untouched. Syncing existing repos is out of scope — that's `pull_all.sh`'s job, not bootstrap's.
 6. **Per-repo env** — for each repo: `poetry env use <uv-3.12>` then `poetry install` with the correct extras (table below). Remove any stray venv not on 3.12 (kills the interpreter churn).
 7. **Vendored SDKs** — for `apollo/webapp/vendor/@logos/*`: build if `dist/` absent (`npm install` → `prepare` → `tsc`), then `apollo/webapp` `npm install`.
-8. **`.env`** — copy each repo's `.env.example` → `.env` only if absent (never overwrite); print which secrets still need real values (e.g. `HERMES_LLM_API_KEY`).
+8. **Config (delegate to logos)** — do NOT hand-roll `.env`. logos already owns config distribution: run `poetry run python logos/infra/scripts/render_test_stacks.py`, which renders each repo's `.env.test` + `docker-compose.test.yml` **in place** (ports injected from `logos_config`, the single source of truth), and `scripts/setup-local-dev.sh` in each repo to materialize `.env` from `.env.example`. The bootstrap provisions only the one genuine local secret — `OPENAI_API_KEY` (placeholder if absent) — and warns to fill it. (`render_test_stacks.py --check` is the drift guard.)
 9. **Infra (prep)** — verify Docker; `docker compose -p infra -f logos/infra/docker-compose.hcg.dev.yml pull`. Do not `up`.
-10. **Verify + summary** — print tool versions, per-repo Python + venv path, image pull status, `.env` status; end with `next: ./apollo/scripts/run_apollo.sh`.
+10. **Verify + summary** — print tool versions, per-repo Python + venv path, image pull status, config/secret status; end with `next: ./apollo/scripts/run_apollo.sh`.
+
+> **Config model (why phase 8 delegates):** `logos` is the central config system. Canonical source `logos/infra/test_stack/` (`repos.yaml`+`services.yaml`+`overlays/`) + `logos_config.ports` → `render_test_stacks.py` stamps per-repo `.env.test`/compose in place. Local override layers: `defaults.context` → `defaults.env` → `repos.<name>.env` → `overlays/` → runtime env. The bootstrap's job is to *run* this, not reinvent it; the only thing it must supply is the `OPENAI_API_KEY` secret.
 
 ## Per-repo config table
 
