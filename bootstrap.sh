@@ -206,15 +206,18 @@ setup_webapp() {
 }
 
 # --- config: delegate to logos --------------------------------------------
-# logos owns config distribution. render_test_stacks.py stamps each repo's
-# .env.test + docker-compose.test.yml IN PLACE (its --output-root defaults to
-# each repo's path; ports injected from logos_config). We do NOT hand-roll
-# .env copying. We only provision the one genuine local secret the dev stack
-# needs: OPENAI_API_KEY (read by run_apollo.sh from apollo/.env). Idempotent.
+# logos owns the CI test-stack config, rendered into logos/infra/<repo>/ (the
+# repos.yaml paths are relative to test_stack/). Regenerating + committing those
+# is a deliberate logos-maintainer step, so here we only DRIFT-CHECK (never
+# mutate committed files). Dev runtime config comes from logos_config + local
+# .env, so the one thing bootstrap must provision is the OPENAI_API_KEY secret
+# (read by run_apollo.sh from apollo/.env). Idempotent.
 distribute_config() {
-  log_info "rendering ecosystem config via logos (writes .env.test + compose into each repo)…"
-  ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py )
-  log_ok "config rendered (ports from logos_config; 'render_test_stacks.py --check' guards drift)"
+  if ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py --check >/dev/null 2>&1 ); then
+    log_ok "logos test-stack config up to date (no drift)"
+  else
+    log_warn "logos test-stack config has drifted — run 'render_test_stacks.py' in logos and commit to refresh."
+  fi
   ensure_openai_secret
 }
 
