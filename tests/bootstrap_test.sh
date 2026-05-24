@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Unit tests for bootstrap.sh pure logic. Sources the script (main is guarded).
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/." || exit 1
-cd ..
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 # shellcheck disable=SC1091
 source ./bootstrap.sh
 

@@ -102,7 +102,9 @@ ensure_uv() {
 ensure_poetry() {
   if command -v poetry >/dev/null 2>&1; then log_ok "poetry present ($(poetry --version))"; return; fi
   log_info "installing poetry…"
-  curl -sSL https://install.python-poetry.org | python3 -
+  # Install with the uv-managed 3.12, not system python3 (which may be missing
+  # or an incompatible version like 3.14). Requires ensure_python312 to run first.
+  curl -sSL https://install.python-poetry.org | "$PYTHON312" -
   command -v poetry >/dev/null 2>&1 || die "poetry install failed; ensure ~/.local/bin is on PATH"
   log_ok "poetry installed ($(poetry --version))"
 }
@@ -110,7 +112,9 @@ ensure_poetry() {
 ensure_fnm() {
   if command -v fnm >/dev/null 2>&1; then log_ok "fnm present"; return; fi
   log_info "installing fnm…"
-  curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+  # Pin the install dir to match the PATH export above — the installer's
+  # default has varied between ~/.fnm and ~/.local/share/fnm across versions.
+  curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "$HOME/.local/share/fnm" --skip-shell
   command -v fnm >/dev/null 2>&1 || die "fnm install failed; ensure ~/.local/share/fnm is on PATH"
   log_ok "fnm installed"
 }
@@ -214,13 +218,16 @@ setup_webapp() {
 # what the logos configurator describes). Dev runtime also needs the one local
 # secret, OPENAI_API_KEY (read by run_apollo.sh from apollo/.env).
 distribute_config() {
-  log_info "generating + distributing ecosystem config via logos…"
-  (
-    cd "$WORKSPACE_ROOT/logos"
-    poetry run python infra/scripts/render_test_stacks.py
-    poetry run python infra/scripts/copy_test_stacks.py
-  )
-  log_ok "config generated (logos/infra) + copied into each repo's containers/"
+  log_info "generating ecosystem config via logos…"
+  ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py )
+  # copy_test_stacks.py lands via a separate logos PR; guard so an unmerged
+  # dependency degrades to a warning instead of failing the whole bootstrap.
+  if [ -f "$WORKSPACE_ROOT/logos/infra/scripts/copy_test_stacks.py" ]; then
+    ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/copy_test_stacks.py )
+    log_ok "config generated (logos/infra) + copied into each repo's containers/"
+  else
+    log_warn "copy_test_stacks.py not present (logos copy-script PR unmerged) — rendered to logos/infra only; per-repo copy skipped."
+  fi
   ensure_openai_secret
 }
 
@@ -267,10 +274,10 @@ main() {
   detect_os
   log_info "LOGOS workspace bootstrap — OS=$OS, root=$WORKSPACE_ROOT"
   ensure_uv
+  ensure_python312   # before poetry: poetry is installed with this interpreter
   ensure_poetry
   ensure_fnm
   ensure_docker
-  ensure_python312
   ensure_node20
   ensure_repos
   local r
