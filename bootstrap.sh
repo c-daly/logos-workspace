@@ -65,7 +65,7 @@ parse_args() {
 OS="unknown"
 detect_os() {
   case "$(uname -s)" in
-    Linux*)  OS="linux"; grep -qi microsoft /proc/version 2>/dev/null && OS="wsl" ;;
+    Linux*)  OS="linux"; grep -qi microsoft /proc/version 2>/dev/null && OS="wsl" || true ;;
     Darwin*) OS="macos" ;;
     *)       die "unsupported OS: $(uname -s)" ;;
   esac
@@ -78,8 +78,8 @@ repo_install_args() {
   local args="--no-interaction"
   case "$1" in
     apollo) args="$args -E otel" ;;
-    sophia) args="$args -E otel"; $WITH_ML && args="$args --with ml" ;;  # ml = group
-    hermes) args="$args -E otel"; $WITH_ML && args="$args -E ml" ;;      # ml = extra
+    sophia) args="$args -E otel"; [ "$WITH_ML" = true ] && args="$args --with ml" ;;  # ml = group
+    hermes) args="$args -E otel"; [ "$WITH_ML" = true ] && args="$args -E ml" ;;      # ml = extra
     logos|talos) : ;;                                                    # no extras
     *) die "unknown repo: $1" ;;
   esac
