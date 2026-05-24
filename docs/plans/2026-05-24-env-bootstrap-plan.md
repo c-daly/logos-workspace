@@ -502,15 +502,20 @@ git commit -m "feat(bootstrap): build vendored SDKs + webapp deps"
 
 ```bash
 # --- config: delegate to logos --------------------------------------------
-# logos owns config distribution. render_test_stacks.py stamps each repo's
-# .env.test + docker-compose.test.yml IN PLACE (its --output-root defaults to
-# each repo's path; ports injected from logos_config). We do NOT hand-roll
-# .env copying. We only provision the one genuine local secret the dev stack
-# needs: OPENAI_API_KEY (read by run_apollo.sh from apollo/.env). Idempotent.
+# logos owns config distribution. render_test_stacks.py generates each repo's
+# stack into logos/infra/<repo>/ (ports from logos_config); copy_test_stacks.py
+# (its companion, also in logos/infra/scripts/) distributes those into each
+# downstream repo's containers/ (the standard location). Both are logos's own
+# deterministic, idempotent scripts — bootstrap just runs them. Dev runtime
+# also needs the one local secret, OPENAI_API_KEY (read from apollo/.env).
 distribute_config() {
-  log_info "rendering ecosystem config via logos (writes .env.test + compose into each repo)…"
-  ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py )
-  log_ok "config rendered (ports from logos_config; 'render_test_stacks.py --check' guards drift)"
+  log_info "generating + distributing ecosystem config via logos…"
+  (
+    cd "$WORKSPACE_ROOT/logos"
+    poetry run python infra/scripts/render_test_stacks.py
+    poetry run python infra/scripts/copy_test_stacks.py
+  )
+  log_ok "config generated (logos/infra) + copied into each repo's containers/"
   ensure_openai_secret
 }
 
