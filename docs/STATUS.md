@@ -1,236 +1,66 @@
 # LOGOS Project Status
 
-**Generated:** 2026-04-05
-**Previous update:** 2026-03-18
-**Foundry Version:** v0.7.0 (all repos at v0.7.0)
+**Generated:** 2026-05-25
+**Previous update:** 2026-04-05
+**Foundry Version:** v0.7.0 (all repos at v0.7.0; no new release this period)
 
 ---
 
-## What Changed Since March 18
+## What Changed Since April 5
 
-**Short answer: almost nothing.** The project has been on pause since ~March 18 due to the user starting a new job. Three issues were filed (two on March 18, one on March 23), one issue was closed (hermes #101, same day as last status), and logos-workspace #5 was closed. No PRs opened, no PRs merged, no commits landed in any service repo. The workspace repo received two documentation commits (vision doc, gitignore updates).
+After the new-job pause, work resumed in late May with a focused **environment + test-stack infrastructure push**, plus a **diagnostic session** that surfaced a previously-undocumented runtime gap (see "Key Finding" below). No new service features landed; the period is infrastructure, developer-experience, and reconstruction.
 
-### Issues Created Since March 18
-- **logos #522** (2026-03-18): fix: robust ML container builds for downstream services (PyTorch CPU index) -- unlabeled
-- **logos #523** (2026-03-23): Update LOGOS ticket templates to be compatible with experiment goal.yaml format -- component:logos
-- **hermes #103** (2026-03-18): fix: restructure ML extras and harden publish-ml build -- unlabeled
+### Recent Work (merged PRs since April 5)
+- **logos-workspace #8** (2026-05-24) — Idempotent env bootstrap for the LOGOS workspace (`bootstrap.sh`): toolchain (uv/Poetry/fnm), Python 3.12 pinning, per-repo extras, vendored webapp SDK build, config distribution.
+- **logos #524** (2026-05-24) — `copy_test_stacks.py`: distribute rendered test stacks from `infra/<repo>/` into downstream repos' `containers/`.
+- **sophia #143** (2026-05-24) — Add `otel` extra (`poetry install -E otel`).
+- **apollo #165** (2026-05-25) — Fix `run_apollo.sh` cold-start: fail loud + build vendored SDKs before webapp install.
+- **hermes #103** (~2026-04-05) — Restructure ML extras, harden publish-ml build (PyTorch CPU index).
 
-### Issues Closed Since March 18
-- **hermes #101** (closed 2026-03-18): [hermes] Add V-JEPA inference and VisualEmbeddingProvider -- closed via PR #102 (already tracked in previous status)
-- **logos-workspace #5** (closed 2026-03-18): Autonomous experiment loop -- closed after engine moved to agent-swarm
+### In Flight (open PRs)
+- **logos #525** — `fix(infra): sync test-stack render template with hand-maintained outputs` (Redis service, offset host ports, `${NEO4J_PASSWORD}` bridge, neo4j 5.11.0 pin). **CI green, all review threads resolved — ready to merge.**
+- **logos-workspace #9** — `feat(bootstrap): add --check-config switch` (render by default, drift-check on demand). CI green.
 
-### PRs Merged Since March 18
-None.
-
-### Open PRs
-None across any repository.
-
-### Commits Since March 18
-- **logos-workspace** (2 commits): `d741ca8` docs and gitignore, `9b8b084` vision doc
-- **logos, sophia, hermes, talos, apollo**: No commits since March 18.
+### Blocked
+- **logos #464** — [Sophia] Update M3 planning tests for flexible ontology (`status:blocked`). Gates Goal 5 (planning) progress; blocked on flexible-ontology downstream updates.
 
 ---
 
-## Open Issue Summary
+## Key Finding: Apollo HCG/persona UI is empty (no ticket yet)
 
-| Repo | Open Issues | Change from Mar 18 |
-|------|-------------|---------------------|
-| logos | 44 | +2 (new: #522, #523; hermes issues tracked in logos) |
-| sophia | 3 | -- |
-| hermes | 2 | +1 (new: #103; #101 closed) |
-| talos | 1 | -- |
-| apollo | 0 | -- |
-| logos-workspace | 0 | -- (was already 0; #5 closed Mar 18) |
-| **Total** | **50** | **+2 net** |
+A live-debug this session found apollo's dashboard shows **no graph and no persona entries, with no errors**. Root cause is **not** empty data or a connection fault:
 
----
+- Sophia starts (via `run_apollo.sh`), connects to Neo4j (`bolt://localhost:7687`), and **seeds successfully** on boot (pick-and-place, plan, persona).
+- apollo connects to the same Neo4j but reads labels Sophia **no longer writes**: `hcg_client.py` queries `:Entity`/`:Process`/`:State`/`:Plan`/`:StateHistory`, and `persona_store.py` reads `:PersonaEntry`. Grep confirms Sophia writes **none** of these as labels post-#490; persona is persisted as `cwm_e` CWM-state nodes via `CWMPersistence`.
+- Empty result sets aren't errors → blank UI, clean logs.
 
-## In Flight
-
-Nothing. No open PRs, no branches with uncommitted work, no active implementation across any repo.
-
----
-
-## Blocked
-
-| Issue | Repo | Title | Blocked On |
-|-------|------|-------|------------|
-| #464 | logos | Update M3 planning tests for flexible ontology | #460, #461 (upstream ontology work) |
-| #463 | logos | Validate M4 demo end-to-end with flexible ontology | #460, #461 (upstream ontology work) |
-
-No change from previous status.
-
----
-
-## Open Issues by Repo
-
-### logos -- 44 open issues
-
-**KG Maintenance epic (#499, status:in-progress, priority:high):**
-- #501: Ontology Pub/Sub Distribution (priority:high, status:in-progress) -- infrastructure landed (logos #512, sophia #136, hermes #95), issue still open for remaining work
-- #503: Entity Resolution -- Alias Detection and Merging (priority:high, status:todo) -- full design + 7-task TDD plan ready, not yet started
-- #504: Type Correction -- Centroid-Based Reclassification (priority:medium, status:todo)
-- #505: Ontology Evolution -- Emergent Type Discovery (priority:medium, status:todo) -- design doc exists
-- #506: Relationship Inference -- Taxonomic Scaffolding and Missing Edges (priority:medium, status:todo)
-- #507: Competing Edges & Confidence Model (priority:medium, status:todo)
-- #508: Maintenance Scheduler -- When and How Jobs Run (priority:medium, status:in-progress) -- scheduler framework landed in sophia #137
-
-**Learning & Memory epic (#415, priority:high):**
-- #411: Hierarchical Memory Infrastructure (priority:high)
-- #412: Event-driven Reflection System (priority:high)
-- #413: Selective Diary Entry Creation (priority:medium)
-- #414: Episodic Memory & Learning (priority:high)
-- #416: Testing Sanity -- prerequisite to learning & memory work (priority:critical)
-
-**Flexible Ontology cleanup (#458-465):**
-- #458: Update ontology with lessons learned from TinyMind (priority:medium)
-- #460: Update sophia planner for flexible ontology (priority:medium)
-- #461: Update downstream repos for flexible ontology (priority:medium)
-- #462: Update pick-and-place test data for flexible ontology (priority:medium)
-- #463: Validate M4 demo end-to-end (priority:medium, status:blocked)
-- #464: Update M3 planning tests (priority:medium, status:blocked)
-- #465: Implement capability catalog in flexible ontology (priority:medium)
-
-**OTel/Observability:**
-- #321: Cross-service coverage gaps
-- #335: [Sophia] Instrument API Endpoints with OTel Spans (priority:high)
-- #338: [Hermes] Instrument API Endpoints with OTel Spans (priority:high)
-- #339: [Hermes] Add OTel Testing & Documentation (priority:medium)
-
-**Persona Diary features:**
-- #246: CWM-E persona diary storage & API exposure (priority:medium)
-- #264: Wire persona diary into Sophia (priority:medium)
-- #265: CWM-E reflection worker (priority:medium)
-- #267: Persona diary UI components (priority:medium)
-
-**Infrastructure & Build (NEW since last status):**
-- #522: Robust ML container builds for downstream services (PyTorch CPU index) -- NEW, unlabeled
-- #523: Update LOGOS ticket templates for experiment goal.yaml format -- NEW, component:logos
-
-**Infrastructure & Other (existing):**
-- #521: Situated Cognitive Agent -- Persistent Operation, Communication Channels, Device Ecosystem (priority:low)
-- #515: Migrate type_definition nodes from fabricated type_* IDs to real UUIDs
-- #498: PM agent: detect undocumented new functionality during status updates
-- #496: Consolidate CWM modules into HCG ontology types (priority:high)
-- #481: Centralize test data seeder script
-- #447: Documentation consolidation (priority:medium)
-- #433: Standardize LOGOS repos
-- #420: Standardize testing infrastructure
-- #409: Standardize developer scripts
-- #403: Deprecate planner_stub in favor of HCGPlanner
-- #311: [Apollo] Implement Authentication and Authorization (priority:high, deferred per non-goals)
-- #317: [Apollo] Advanced Graph Layouts and Visualization Options (priority:low)
-- #135: Developer onboarding guide (priority:medium)
-- #91: Add OpenAPI validation tests (priority:high)
-
-### sophia -- 3 open issues
-- #142: Fix /feedback delivery and implement minimal confidence update (priority:high)
-- #101: Define session boundaries and ephemeral node lifecycle (priority:medium)
-- #20: Extend HCG + Executor to support general tool actions (priority:medium)
-
-### hermes -- 2 open issues
-- #103: Restructure ML extras and harden publish-ml build -- NEW, unlabeled
-- #100: Deploy interim JEPA translator as /embed_visual endpoint (priority:high)
-
-### talos -- 1 open issue
-- #31: Add coverage reporting and audit skip conditions
-
-### apollo -- 0 open issues
-
-### logos-workspace -- 0 open issues
+This is the **documented-but-unstarted work of logos #496** ("Consolidate CWM modules into HCG ontology types and retire `logos_cwm_e`"), whose problem list literally includes *"Apollo's `PersonaEntry` schema drift"* and whose acceptance criteria include *"Apollo's `PersonaEntry` model reconciled with ontology definition"* — all unchecked. It got stranded when the CWM-consolidation track was deferred behind the KG-maintenance track. **Recommend filing an apollo-reader-reconciliation issue under #496** (draft prepared this session).
 
 ---
 
 ## Progress Against Vision Goals
 
-### 1. Complete the cognitive loop -- STALLED (was: infrastructure ready)
-
-No implementation work since March 18. Entity resolution (#503) still has its full design + 7-task TDD plan ready to execute but nobody has picked it up. The KG maintenance epic (#499) and its sub-stories (#503-508) are all in the same state they were 18 days ago. Feedback processing (sophia #142) untouched. This was the declared top priority.
-
-**Ready to execute:** Entity resolution (#503) -- design doc + implementation plan exist
-**Designed but not planned:** Ontology evolution (#505)
-**Still needs design:** Feedback processing, type correction (#504), relationship inference (#506)
-
-### 2. Grounded perception via JEPA -- STALLED (was: building)
-
-Hermes #101 (V-JEPA inference + VisualEmbeddingProvider) merged March 18 -- the last code change to land anywhere. Hermes #100 (deploy interim JEPA translator as `/translate_visual`) remains the next pick but has not been started. Two new build-related issues were filed (logos #522, hermes #103) for ML container/packaging problems discovered during the #101 work, suggesting there are unresolved build issues that would need attention before #100 can ship cleanly.
-
-### 3. Flexible ontology -- STALLED (no change since Mar 2)
-
-No movement. Downstream cleanup issues (#458-465) remain open. #464 and #463 still blocked on #460/#461. Type_definition UUID migration (#515) untouched. The reified model is implemented but downstream propagation has stalled for 34 days.
-
-### 4. Memory and learning -- NOT STARTED
-
-No change. Epic #415 and stories (#411-414) still waiting. Testing sanity (#416, priority:critical) remains the prerequisite.
-
-### 5. Planning and execution -- PAUSED
-
-No change. Planner stub deprecation (#403) still open. Still blocked on flexible ontology downstream updates (#460).
-
-### 6. Embodiment via Talos -- PAUSED
-
-No change. Correctly deprioritized.
-
-### 7. Infrastructure and observability -- STABLE, new build issues surfaced
-
-No new infrastructure work. Two new issues surfaced around ML container builds: logos #522 (PyTorch CPU index for downstream services) and hermes #103 (ML extras restructuring). These were discovered during the hermes PR #102 work and filed March 18 but not yet addressed. They may affect the ability to ship hermes #100 (JEPA translator deployment).
-
-OTel gaps unchanged: endpoint-level spans for Sophia (#335) and Hermes (#338), cross-service testing (#321), Hermes OTel docs (#339).
-
-### 8. Documentation and testing -- MINOR UPDATES
-
-Two workspace commits landed (vision doc updates, gitignore). logos #523 filed to align ticket templates with experiment goal.yaml format. Otherwise no change. Testing gaps (#416, #420, #91) still open.
+1. **Complete the cognitive loop** — *in progress.* Maintenance **scaffolding** done (Redis/pub-sub #500, ontology pub/sub #501, scheduler #508), but the four reasoning jobs (#503–507) are all `todo`. The scheduler runs with essentially no jobs yet.
+2. **Grounding / physical knowledge** — *research active, integration deferred.* Unchanged this period (V-JEPA→CLIP PoC stands at txt_R@1 ≈ 0.371 vs 0.42 target).
+3. **Flexible ontology** — *in progress, partially stalled.* Reified model (#490) merged is the foundation. The CWM→ontology consolidation (#496) is **not started** and is the direct cause of the Apollo finding above. Also open: type_definition UUID migration (#515), capability catalog (#465), downstream propagation (#460/#461).
+4. **Memory and learning** — *not started.* Spec #415; depends on cognitive-loop maturity + testing sanity (#416).
+5. **Planning and execution** — *in progress / blocked.* Planner stub still co-exists with HCGPlanner (#403); blocked on flexible-ontology downstream (#460, #464).
+6. **Embodiment via Talos** — *paused* (deliberately deprioritized until cognition is solid).
+7. **Infrastructure & observability** — *in progress; active this period.* This session: env bootstrap (#8), test-stack render/copy pipeline (#524, #525), run_apollo cold-start (#165), sophia otel extra (#143). Remaining: test data seeder centralization (#481), developer scripts (#409), endpoint spans (#335/#338), cross-service OTel testing (#321).
+8. **Documentation & testing** — *in progress.* PM agent + planning docs rediscovered and STATUS refreshed (this doc). Remaining: onboarding guide (#135), OpenAPI contract tests (#91).
+9. **Situated cognitive agent** — *deferred* (#521; prereqs Goals 1/4/5/6).
 
 ---
 
-## Stale / Drift
+## Drift / Reconciliation
 
-**Stale issues (>30 days no activity as of April 5):**
-
-Nearly everything is stale. With the project paused since March 18, all issues that were not updated in the last session are now 30+ days without activity. The most concerning:
-
-| Issue | Repo | Last Activity | Days Stale |
-|-------|------|---------------|------------|
-| #20 | sophia | 2026-02-28 | 36 |
-| #31 | talos | 2026-02-28 | 36 |
-| #91 | logos | 2026-02-28 | 36 |
-| #135 | logos | 2026-02-28 | 36 |
-| #246-267 | logos | 2026-02-28 | 36 |
-| #311-339 | logos | 2026-02-28 | 36 |
-| #403-420 | logos | 2026-02-28 | 36 |
-| #433-465 | logos | 2026-02-28 | 36 |
-| #481 | logos | 2026-02-28 | 36 |
-| #496-498 | logos | 2026-02-28 - 03-04 | 32-36 |
-| #504-508 | logos | 2026-03-01 - 03-14 | 22-35 |
-| #515 | logos | 2026-03-04 | 32 |
-| #101 | sophia | 2026-03-01 | 35 |
-
-This is expected given the pause. No action needed unless the user wants to triage/close some of the older issues.
-
-**Potential closures (review with user):**
-- logos #501 (Ontology Pub/Sub Distribution): Significant implementation landed (sophia #136, hermes #95). Still marked in-progress -- review remaining scope.
-- logos #508 (Maintenance Scheduler): Core scheduler framework landed in sophia #137. Still marked in-progress -- review remaining scope.
-- logos #498 (PM agent: detect undocumented new functionality): This meta-tooling request may have been superseded by the PM agent skill in agent-swarm.
-
-**New issues needing labels:**
-- logos #522: No labels. Should have component, priority, type labels.
-- logos #515: No labels. Should have component, domain, type labels.
-- hermes #103: No labels. Should have component, priority, type labels.
-
-**Status label drift:**
-- logos #501 and #508 are marked `status:in-progress` but have had no activity in 22-35 days. These should either be actively worked or moved to `status:todo`.
+`scripts/reconcile-issues.sh` flags older open issues (mostly 2026-02/03) not reflected in the project board — e.g. logos #412 (event-driven reflection), #411 (hierarchical memory), #403 (deprecate planner_stub), #321/#335/#338/#339 (OTel gaps), #246/#264/#265/#267 (persona diary stack — legacy `logos_cwm_e`, subsumed by #496), and the maintenance stories #503–507. Worth a board/label pass at next vision review.
 
 ---
 
-## Observations
+## Current Priorities (carried from VISION + this session)
 
-**The project is paused, not abandoned.** Everything is exactly where it was left on March 18. No regressions, no drift in the codebase itself. The backlog is intact, designs are still valid, and the implementation plans have not rotted. This is a clean pause point.
-
-**Resumption priorities are clear.** When work resumes, the previous priorities still hold:
-1. **Entity resolution (#503)** -- full design + 7-task TDD plan ready to execute. This is the most shovel-ready work item.
-2. **Hermes #100 (JEPA translator deployment)** -- but check logos #522 and hermes #103 first. ML container build issues may need resolution before this can ship.
-3. **Flexible ontology downstream (#460, #461)** -- still blocking the planning track and two other issues.
-
-**Three unlabeled issues need triage.** logos #522, logos #515, and hermes #103 were filed without full labels. A quick labeling pass would keep the backlog clean.
-
-**The 18-day gap has pushed most issues past the 30-day stale threshold.** This is cosmetic -- the issues are not actually stale in the sense of being forgotten. But if the pause continues significantly longer, it would be worth reviewing whether any priorities have shifted.
+1. **Apollo reader reconciliation** (slice of #496) — get the dashboard surfacing seeded data; unblocks day-to-day use and validates the cognitive loop end-to-end.
+2. Cognitive-loop expansion — first KG-maintenance reasoning job (#503 entity resolution; design + plan ready).
+3. Flexible-ontology consolidation (#496 in full) + downstream propagation (#460/#461/#515).
+4. Merge the in-flight infra PRs (logos #525, logos-workspace #9); infra hardening (seeder #481, remaining standardization).
