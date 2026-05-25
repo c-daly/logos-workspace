@@ -227,6 +227,12 @@ distribute_config() {
   # (re-running reproduces the committed outputs), so it runs by default.
   # --check-config verifies committed config matches the template WITHOUT
   # writing anything — handy for CI or a read-only sanity pass.
+  if [ ! -f "$WORKSPACE_ROOT/logos/infra/scripts/render_test_stacks.py" ]; then
+    log_warn "logos render script not found — skipping config distribution (is logos cloned?)."
+    [ "$CHECK_CONFIG" = true ] || ensure_openai_secret
+    return
+  fi
+
   local flag=""
   if [ "$CHECK_CONFIG" = true ]; then
     flag="--check"
@@ -259,10 +265,13 @@ distribute_config() {
     else
       die "copy_test_stacks.py failed"
     fi
+  elif [ "$CHECK_CONFIG" = true ]; then
+    log_warn "copy_test_stacks.py not present — downstream test stacks not checked."
   else
     log_warn "copy_test_stacks.py not present — rendered to logos/infra only; per-repo copy skipped."
   fi
-  ensure_openai_secret
+  # ensure_openai_secret writes apollo/.env, so skip it in read-only check mode.
+  [ "$CHECK_CONFIG" = true ] || ensure_openai_secret
 }
 
 # Ensure apollo/.env carries the OPENAI_API_KEY line; never overwrite a real value.
