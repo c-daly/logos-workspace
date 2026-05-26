@@ -10,7 +10,7 @@
 # It does NOT start services — that is run_apollo.sh's job. This script
 # is safe to re-run: every phase checks-then-acts and converges.
 #
-# Usage:  ./bootstrap.sh [--with-ml] [--skip-clone] [--help]
+# Usage:  ./bootstrap.sh [--with-ml] [--skip-clone] [--check-config] [--help]
 #
 # POSIX-friendly bash (no associative arrays) so it runs on macOS's
 # stock bash 3.2 as well as Linux/WSL2.
@@ -32,6 +32,7 @@ die()      { log_err "$*"; exit 1; }
 # --- args ------------------------------------------------------------------
 WITH_ML=false
 SKIP_CLONE=false
+CHECK_CONFIG=false
 
 usage() {
   cat <<'EOF'
@@ -42,20 +43,22 @@ Installs the toolchain (uv, Poetry, fnm/Node), pins every repo to Python
 webapp SDKs, scaffolds .env files, and pulls infra images. Does NOT start
 services (use apollo/scripts/run_apollo.sh). Safe to re-run.
 
-Usage: ./bootstrap.sh [--with-ml] [--skip-clone] [--help]
+Usage: ./bootstrap.sh [--with-ml] [--skip-clone] [--check-config] [--help]
 
-  --with-ml      include heavy ML deps (torch) for sophia/hermes
-  --skip-clone   assume repos are already checked out
-  --help         show this help
+  --with-ml       include heavy ML deps (torch) for sophia/hermes
+  --skip-clone    assume repos are already checked out
+  --check-config  drift-check the test-stack config (do not regenerate it)
+  --help          show this help
 EOF
 }
 
 parse_args() {
   for arg in "$@"; do
     case "$arg" in
-      --with-ml)    WITH_ML=true ;;
-      --skip-clone) SKIP_CLONE=true ;;
-      -h|--help)    usage; exit 0 ;;
+      --with-ml)      WITH_ML=true ;;
+      --skip-clone)   SKIP_CLONE=true ;;
+      --check-config) CHECK_CONFIG=true ;;
+      -h|--help)      usage; exit 0 ;;
       *)            die "unknown argument: $arg (try --help)" ;;
     esac
   done
@@ -218,17 +221,57 @@ setup_webapp() {
 # what the logos configurator describes). Dev runtime also needs the one local
 # secret, OPENAI_API_KEY (read by run_apollo.sh from apollo/.env).
 distribute_config() {
-  log_info "generating ecosystem config via logos…"
-  ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py )
+  # Generate (or, with --check-config, drift-check) the per-repo test-stack
+  # config from logos's template — the source of truth: infra/test_stack/
+  # (services.yaml + repos.yaml) + logos_config.ports. The render is idempotent
+  # (re-running reproduces the committed outputs), so it runs by default.
+  # --check-config verifies committed config matches the template WITHOUT
+  # writing anything — handy for CI or a read-only sanity pass.
+  if [ ! -f "$WORKSPACE_ROOT/logos/infra/scripts/render_test_stacks.py" ]; then
+    log_warn "logos render script not found — skipping config distribution (is logos cloned?)."
+    [ "$CHECK_CONFIG" = true ] || ensure_openai_secret
+    return
+  fi
+
+  local flag=""
+  if [ "$CHECK_CONFIG" = true ]; then
+    flag="--check"
+    log_info "drift-checking ecosystem config via logos (no mutation)…"
+  else
+    log_info "generating ecosystem config via logos…"
+  fi
+
+  # shellcheck disable=SC2086  # $flag is intentionally empty or "--check"
+  if ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/render_test_stacks.py $flag ); then
+    log_ok "logos test-stack config OK"
+  elif [ "$CHECK_CONFIG" = true ]; then
+    log_warn "logos test-stack outputs drifted from the template — regenerate: (cd logos && poetry run python infra/scripts/render_test_stacks.py)"
+  else
+    die "render_test_stacks.py failed"
+  fi
+
   # copy_test_stacks.py lands via a separate logos PR; guard so an unmerged
   # dependency degrades to a warning instead of failing the whole bootstrap.
   if [ -f "$WORKSPACE_ROOT/logos/infra/scripts/copy_test_stacks.py" ]; then
-    ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/copy_test_stacks.py )
-    log_ok "config generated (logos/infra) + copied into each repo's containers/"
+    # shellcheck disable=SC2086
+    if ( cd "$WORKSPACE_ROOT/logos" && poetry run python infra/scripts/copy_test_stacks.py $flag ); then
+      if [ "$CHECK_CONFIG" = true ]; then
+        log_ok "downstream test stacks in sync"
+      else
+        log_ok "config copied into each repo's containers/"
+      fi
+    elif [ "$CHECK_CONFIG" = true ]; then
+      log_warn "downstream test stacks differ from logos/infra — run copy_test_stacks.py in logos to sync."
+    else
+      die "copy_test_stacks.py failed"
+    fi
+  elif [ "$CHECK_CONFIG" = true ]; then
+    log_warn "copy_test_stacks.py not present — downstream test stacks not checked."
   else
-    log_warn "copy_test_stacks.py not present (logos copy-script PR unmerged) — rendered to logos/infra only; per-repo copy skipped."
+    log_warn "copy_test_stacks.py not present — rendered to logos/infra only; per-repo copy skipped."
   fi
-  ensure_openai_secret
+  # ensure_openai_secret writes apollo/.env, so skip it in read-only check mode.
+  [ "$CHECK_CONFIG" = true ] || ensure_openai_secret
 }
 
 # Ensure apollo/.env carries the OPENAI_API_KEY line; never overwrite a real value.
