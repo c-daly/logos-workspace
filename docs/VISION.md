@@ -1,5 +1,17 @@
 # LOGOS Vision
 
+> **Reading this against the code.** This document states the *full* vision — an
+> open-ended research program. For where the code actually stands today (roughly
+> 35–40% of the near-term vision; foundation strong, cognitive core largely spec),
+> read `docs/STATUS.md`. The concrete near-term milestone is **Minimum Thinking
+> Sophia (MTS)** — the point where LOGOS becomes a small mind that runs: it grows
+> and maintains its graph, reasons/plans over it, learns from feedback, runs as a
+> persistent loop, and surfaces its state in Apollo. MTS is six sprints out; the
+> plan is `docs/plans/2026-05-29-roadmap-to-mts.md`. Everything past MTS
+> (grounding, embodiment, the situated agent, the papers) is **Horizon 2**.
+> Aspirational capabilities below are marked; goal status lines reflect the
+> 2026-05-29 code-grounded audit.
+
 ## What LOGOS Is
 
 LOGOS is a non-linguistic cognitive architecture built on a core assertion: **text is a poor substrate for thought.** Language models trained on text lack the grounded common sense that comes from non-linguistic experience. LOGOS addresses this by separating cognition from language entirely.
@@ -8,7 +20,7 @@ Sophia (the cognitive core) reasons over a knowledge graph (HCG) where nodes, ed
 
 Grounded understanding comes from JEPA (Joint Embedding Predictive Architecture) models that learn physical/sensory representations without text. These form the Grounded working memory (CWM-G) — a layer of common sense that language models fundamentally cannot provide. The Abstract working memory (CWM-A) captures conceptual and relational knowledge. The Emotional working memory (CWM-E) tracks emotional and persona states. All three are aspects of the same graph, not separate systems.
 
-Planning is a core capability. The HCGPlanner performs backward-chaining over REQUIRES/CAUSES edges to produce executable plans, and Talos provides the embodiment layer — abstracting hardware (or simulated hardware) so that Sophia's plans can drive real-world interaction. The system is designed to be situated: perceiving, reasoning, planning, and acting in a physical environment.
+Planning is a core capability *by design*. An `HCGPlanner` exists in the foundry that performs backward-chaining over REQUIRES/CAUSES edges to produce executable plans — but it is **not yet invoked anywhere in the running loop**, and a planner stub still co-exists with it (logos #403). Talos is intended as the embodiment layer — abstracting hardware (or simulated hardware) so that Sophia's plans can drive real-world interaction — and currently stands at a simulation scaffold. The system is *designed* to be situated: perceiving, reasoning, planning, and acting in a physical environment. (Aspirational; situated operation is Horizon 2, Goal 9.)
 
 ## Domains
 
@@ -27,11 +39,11 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 
 ## Goals
 
-1. **Complete the cognitive loop** — in progress
-   The core perception → reasoning → action cycle works end-to-end (Hermes extracts entities/relations, Sophia stores and retrieves from HCG, context enriches LLM responses). Centralized Redis event bus (`logos_events`) provides the backbone. Ontology pub/sub distribution keeps Sophia and Hermes type-synced at runtime. The maintenance scheduler gives Sophia autonomous graph-reasoning triggers. KG maintenance work (entity resolution, type correction, relationship inference, ontology evolution) is how this loop becomes self-correcting. Expand with: entity resolution (#503), feedback processing, planning integration, multi-turn memory.
+1. **Complete the cognitive loop** — in progress (the spine of MTS)
+   The *ingestion* arc works end-to-end (Hermes extracts entities/relations, Sophia stores to HCG and retrieves context that enriches LLM responses); the centralized Redis event bus (`logos_events`) and runtime ontology pub/sub between Sophia and Hermes are live on main, and the maintenance scheduler is wired. **But the loop is not yet self-correcting or autonomous:** embeddings silently fail to persist at ingestion (the keystone bug, sophia#146 / logos#528), so the type classifier degrades to a fallback and emergence starves; feedback is a stub that logs and discards; the scheduler has essentially no reasoning jobs; and Sophia runs request/response, not as a persistent event-driven process. Closing this is the through-line of the six MTS sprints: stabilize the spine (Sprint 1) → feedback mutates the graph (Sprint 2) → orchestrator + event-driven loop (Sprint 3) → K-lines/curiosity/gain (Sprint 4) → memory + planning-in-loop (Sprint 5) → demonstrate (Sprint 6). See `docs/plans/2026-05-29-roadmap-to-mts.md`.
 
 2. **Grounding and physical knowledge** — research active (integration deferred)
-   Give Sophia intuitive physical common sense — the ability to recognize when something is physically ridiculous, or to anticipate what happens when a robot takes a corner too fast. This is what makes LOGOS fundamentally different from text-only systems: cognition grounded in experience, not language. The implementation approach is JEPA (Joint Embedding Predictive Architecture) models that learn physical/sensory representations without text, feeding into CWM-G. PoC exists in sophia (#76) with pluggable backend, tests, docs, and API shape validation. **Research is active:** the V-JEPA token-grid PoC (logos-workspace PR #4) ran 80+ experiments translating V-JEPA temporal tokens into CLIP space, achieving txt_R@1 = 0.371 (target 0.42). A universal embedding layer design (`docs/plans/2026-03-06-universal-embedding-layer-design.md`) defines the multi-head autoencoder architecture. **Integration into Sophia remains deferred** until the cognitive loop matures, but the research track is validating feasibility now.
+   Give Sophia intuitive physical common sense — the ability to recognize when something is physically ridiculous, or to anticipate what happens when a robot takes a corner too fast. This is what makes LOGOS fundamentally different from text-only systems: cognition grounded in experience, not language. The implementation approach is JEPA (Joint Embedding Predictive Architecture) models that learn physical/sensory representations without text, feeding into CWM-G. PoC exists in sophia (#76) with pluggable backend, tests, docs, and API shape validation. **Research is active:** the V-JEPA token-grid PoC (logos-workspace PR #4) ran 80+ experiments translating V-JEPA temporal tokens into CLIP space, achieving txt_R@1 = 0.371 (target 0.42). The design and plan are `docs/plans/2026-03-05-jepa-clip-translator-design.md` / `-plan.md`. **Integration into Sophia is Horizon 2** — deferred until MTS is reached and the cognitive loop matures — but the research track is validating feasibility now.
 
 3. **Flexible ontology** — in progress
    Replace rigid schema-typed nodes with a structure-typed model where meaning comes from IS_A edges and graph position. Core reified model is implemented (PR #490); ontology hierarchy restructured (#510). CWM-A, CWM-G, and CWM-E are semantically distinct aspects of the same graph — the current module-level separation (separate packages, raw Cypher) needs to become ontology-level (type definitions, HCG client, #496). Remaining: downstream repo updates (#460, #461), type_definition UUID migration (#515), capability catalog (#465).
@@ -39,11 +51,11 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 4. **Memory and learning** — not started
    Transform LOGOS from a stateless system into one that learns from experience. Hierarchical memory (ephemeral → short-term → long-term), event-driven reflection, selective diary entries, episodic learning. Spec exists (#415), prerequisites need completing. The Redis event bus and maintenance scheduler landed as foundational infrastructure. Testing sanity (#416, priority:critical) must happen first.
 
-5. **Planning and execution** — in progress
-   Sophia reasons in order to act — whether that's answering a user's question ("how do I get to LA by tomorrow?") or driving a robot arm from point A to point B. The HCGPlanner does backward-chaining over REQUIRES/CAUSES edges to produce executable plans represented as Process nodes. Planner stub still exists alongside the real implementation (#403). As Talos matures, plans connect to real-world actuation. Blocked on flexible ontology downstream updates (#460).
+5. **Planning and execution** — early / mostly aspirational
+   Sophia should reason in order to act — whether that's answering a user's question ("how do I get to LA by tomorrow?") or driving a robot arm from point A to point B. An `HCGPlanner` exists in the foundry that does backward-chaining over REQUIRES/CAUSES edges to produce plans as Process nodes, **but it is not invoked anywhere in the running loop**, and a planner stub still co-exists with it (#403). Planning-in-loop — new knowledge enabling a goal triggers the planner — is **Sprint 5** of the MTS plan, gated on the feedback loop and memory tiers landing first; the planner-vs-stub reconciliation (#403/#464) is a decision deferred to that sprint. As Talos matures (Horizon 2), plans connect to real-world actuation. Downstream flexible-ontology updates (#460, #464) are prerequisites.
 
 6. **Embodiment via Talos** — paused
-   Talos abstracts hardware behind a consistent HAL. Current state is a simulation scaffold — `docs/proposed_docs/TALOS_IMPROVEMENTS.md` outlines the path to physics-backed simulation (ROS2/Gazebo/MuJoCo). Connects Sophia's plans to real-world actuation and perception feeds (camera frames, IMU, joint state) back into the cognitive loop. Correctly deprioritized until the cognitive layer is solid.
+   Talos abstracts hardware behind a consistent HAL. Current state is a simulation scaffold — `docs/TALOS_IMPROVEMENTS.md` outlines the path to physics-backed simulation (ROS2/Gazebo/MuJoCo). Connects Sophia's plans to real-world actuation and perception feeds (camera frames, IMU, joint state) back into the cognitive loop. Correctly deprioritized until the cognitive layer is solid.
 
 7. **Infrastructure and observability** — in progress
    CI discipline tooling (branch naming, issue linkage) landed across all repos. Reusable workflows pinned to ci/v2. Centralized Redis and `logos_events` package provide the event backbone. Port standardization completed. Docker stacks aligned. OTel instrumentation exists across services via `logos_observability`; Apollo OTel integration complete (PR #156, closing #340, #341, #342). Gaps remain in endpoint-level spans (#335, #338), cross-service testing (#321), and Hermes OTel documentation (#339). Remaining: standardize repos (#433), developer scripts (#409), test data seeder (#481).
@@ -63,7 +75,13 @@ Planning is a core capability. The HCGPlanner performs backward-chaining over RE
 
 ## Current Priorities
 
-1. Cognitive loop expansion (entity resolution, feedback processing, KG maintenance execution)
-2. KG maintenance stories (#503, #504, #505, #506) — #503 has full design + implementation plan ready
-3. Flexible ontology downstream propagation (#460, #461, #515)
-4. Infrastructure hardening (remaining standardization, coverage)
+Driven by **MTS Sprint 1 — "Make the built spine actually run & be trusted"**
+(`docs/plans/2026-05-29-roadmap-to-mts.md`). Critical path: logos#528 → sophia#146 → live-verified #505.
+
+1. **Keystone:** fix embedding persistence (logos#528 upsert-by-uuid + schema, then sophia#146 warn-only swallow) — without this the classifier and emergence both starve.
+2. Finish & merge #505 emergent type discovery, live-verified on real infra.
+3. De-vacuum integration tests + run them in CI (logos#529); add Redis to CI (logos #526).
+4. Cross-repo foundry sync (apollo/talos → v0.7.1, logos#530); FeedbackConfig port fix (sophia #142).
+
+Sprint 2+ then closes the feedback loop, builds the orchestrator/event-driven loop,
+and adds the cognitive mechanisms — see the roadmap for the full six-sprint arc.
