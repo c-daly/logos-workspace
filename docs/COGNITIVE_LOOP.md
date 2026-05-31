@@ -1,6 +1,25 @@
 # Cognitive Loop — What It Does and Doesn't Do
 
-An honest accounting of the cognitive loop feature, covering the initial implementation (logos #490/#491, sophia #125/#127, hermes #82/#84) and the performance sprint (sophia #128/#131, hermes #85, apollo #161, logos #492). Updated 2026-02-28.
+An honest accounting of the cognitive loop feature, covering the initial implementation (logos #490/#491, sophia #125/#127, hermes #82/#84) and the performance sprint (sophia #128/#131, hermes #85, apollo #161, logos #492). Updated 2026-05-30 against the 2026-05-29 code-grounded audit.
+
+> **Scope note.** This documents the *ingestion* arc of the loop — extract → store
+> → retrieve context → enrich the LLM prompt. That arc is built and runs, but it
+> is **not** the full cognitive loop the vision describes: there is no autonomous
+> reasoning, feedback does not mutate the graph, and Sophia runs request/response
+> rather than as a persistent event-driven process. Building the rest is the work
+> of the six MTS sprints (`docs/plans/2026-05-29-roadmap-to-mts.md`).
+>
+> **Keystone caveat (read before trusting "embeddings written to Milvus" below).**
+> The audit found embeddings **silently fail to persist** — the `hcg_*_embeddings`
+> Milvus collections read 0 in the live flow. Sophia swallows the write failure in
+> a warn-only `try/except` (`sophia/src/sophia/ingestion/proposal_processor.py:519-524`),
+> and the logos Milvus sync is insert-only against an `auto_id` PK
+> (`logos/logos_hcg/sync.py:155,315,365`), so re-syncs append duplicates instead of
+> upserting. With no retrievable vectors, the type classifier degrades to the
+> fallback type and #505 emergence loads 0 members. This is the Sprint-1 keystone
+> (sophia#146 depends-on logos#528). Where this document says an embedding is
+> "written to Milvus" as a working side effect, treat it as *attempted but
+> currently a no-op* until that fix lands.
 
 ## The End-to-End Flow
 
@@ -79,8 +98,10 @@ Hermes POST /llm
 | HCG Client `query_neighbors()` | Working | Bidirectional traversal through reified edges |
 | Milvus dedup (ENTITY_MATCH_THRESHOLD=0.5) | Working | L2 distance check, entities below threshold are skipped |
 | Context retrieval | Working | Searches 5 Milvus collections (Entity, Concept, State, Process, Edge), top 10 by L2 score |
-| Feedback dispatch to Redis | Working | Enqueues FeedbackPayload via LPUSH, worker dequeues via BRPOP |
+| Feedback dispatch to Redis | Working (transport only) | Enqueues FeedbackPayload via LPUSH, worker dequeues via BRPOP. **The payload then goes nowhere** — `/feedback` is a stub (see below); making feedback mutate the graph is Sprint 2 |
 | Feedback worker | Working | Retries with exponential backoff, max 5 attempts, dead-letter queue |
+| Inter-service event bus (`logos_events`) | Working, on main | Centralized Redis pub/sub (logos #519) carries **real** inter-service traffic — Sophia publishes ontology events, Hermes subscribes for runtime type sync (sophia #501). Earlier docs claimed the bus carried no inter-service traffic; that is no longer true |
+| Maintenance scheduler | Wired, on main | sophia #508 — runs as a process, but the reasoning jobs it would dispatch (#503/#504/#506) are unbuilt, so it currently does ~nothing |
 | Edge processing | Working | Resolves entity names to UUIDs, creates reified edge nodes in Neo4j, stores edge embeddings in Milvus "Edge" collection |
 | Experiment tracking | Working | Creates experiment_run nodes with PRODUCED edges to track pipeline configuration and outputs |
 | Batch proposal processing | Working | Proposals are batched and processed in parallel (sophia #131), reducing per-proposal overhead |
@@ -152,15 +173,20 @@ The original task queue (from PR #490) listed several pending items. Current sta
 | `/ingest/hermes_proposal` endpoint | Unit (5 tests) | Processor is None (not initialized), so only tests the HTTP layer, not actual processing |
 | HCG Client `add_node`, `add_edge` | Unit | Mock Neo4j driver |
 
-### What's NOT tested
+> **Stale-claim correction (2026-05-30).** Earlier revisions of this section said
+> `ProposalBuilder` and the Hermes Sophia-integration path had *zero tests*. That
+> is no longer true: `hermes/tests/unit/test_proposal_builder.py` covers NER
+> extraction, entity proposal, pipeline metadata, graceful degradation, and the
+> combined-extractor pipeline (6 tests), and `test_llm_endpoint_dual_proposal.py`
+> exercises the `/llm` context-injection path. The rows below are updated to match.
+
+### What's NOT tested (or under-tested)
 
 | Component | Impact |
 |-----------|--------|
-| `ProposalBuilder` (hermes) | Zero tests. NER extraction, entity embedding, document embedding — all untested |
-| `_get_sophia_context()` (hermes) | Zero tests. The entire Sophia integration path — untested |
-| `_build_context_message()` (hermes) | Zero tests. Context formatting — untested |
-| Context injection in `/llm` | Zero tests. The message list mutation — untested |
-| Full pipeline (hermes → sophia → Neo4j → Milvus → context return) | Zero integration tests with real services |
+| `ProposalBuilder` (hermes) | **Now unit-tested** (`test_proposal_builder.py`, 6 tests). Real-service embedding/Milvus behavior still only exercised at the seam, not end-to-end |
+| `/llm` context injection (hermes) | **Now covered** by `test_llm_endpoint_dual_proposal.py`. The live Sophia round-trip is still mocked, not integration-tested |
+| Full pipeline (hermes → sophia → Neo4j → Milvus → context return) | Integration tests exist but are **vacuous** at the seam — `test_hermes_ingestion_integration.py:139` queries `{id: $proposal_id}` while nodes are stored with `uuid`, so it asserts nothing (S1-04 / logos#529). This is *why* the keystone embedding bug went undetected |
 | Feedback loop (sophia → Redis → worker → hermes) | Zero tests |
 | Milvus dedup with real embeddings | Zero tests. The L2 threshold of 0.5 is untested against real data |
 | SHACL validation rejecting a malformed node | Zero tests |
@@ -193,16 +219,20 @@ The original task queue (from PR #490) listed several pending items. Current sta
 
 ## What Expanding the Loop Looks Like
 
-The cognitive loop as shipped is the thinnest possible slice: extract entities → store in graph → retrieve as context → enrich LLM prompt. The main axes of expansion are:
+The cognitive loop as shipped is the thinnest possible slice: extract entities → store in graph → retrieve as context → enrich LLM prompt. Expanding it into the loop the vision describes is exactly the arc of the six **MTS sprints** (`docs/plans/2026-05-29-roadmap-to-mts.md`); the axes below map onto those sprints.
+
+0. **Stabilize the spine (Sprint 1, now)** — before adding anything, the keystone embedding-persistence bug (sophia#146 / logos#528) must land so vectors actually persist, the vacuous integration tests must assert real outcomes (logos#529), and #505 emergent-type discovery must merge live-verified. Don't build cognition on a foundation that's secretly a no-op.
 
 1. **Relationship extraction** — ✅ Implemented. Hermes extracts verb-mediated relations via spaCy and proposes edges with embeddings. Sophia resolves names to UUIDs and stores edges in Neo4j + Milvus. Future work: LLM-based extraction for more complex relationships.
 
-2. **Feedback processing** — Make the `/feedback` endpoint actually do something: update confidence scores, deprecate nodes, adjust the dedup threshold, trigger re-embedding.
+2. **Feedback processing (Sprint 2)** — Make the `/feedback` endpoint actually mutate the graph: update confidence scores, dedup/deprecate nodes, adjust the threshold, trigger re-embedding. Today it logs and discards.
 
-3. **Planning integration** — The `HCGPlanner` exists in the foundry but isn't invoked anywhere in the loop. A natural extension: after ingesting a proposal, Sophia checks if the new knowledge enables any pending goals and triggers planning.
+3. **Orchestrator + event-driven loop (Sprint 3)** — Sophia runs request/response today. Turn it into a persistent process reacting to bus events, with ≥1 daemon transforming a real signal. (Design: `docs/plans/2026-03-14-event-driven-cognitive-loop-design.md`.)
 
-4. **Context quality** — Current context is a flat bullet list. Could be structured (subgraph snippet, relationship paths, confidence-weighted), summarized (LLM-generated summary of relevant knowledge), or filtered (only return context above a confidence threshold).
+4. **K-lines / curiosity / CWM-E gain (Sprint 4)** — stimulus activates a constellation; non-activation emits curiosity; CWM-E state measurably modulates processing. The CWM-E state models exist; the mechanisms don't.
 
-5. **Multi-turn memory** — Currently each `/llm` call is independent. The `correlation_id` exists but isn't used to link turns into a conversation. Building conversation-level context would require tracking which proposals belong to the same session.
+5. **Memory tiers + planning integration (Sprint 5)** — knowledge promotes ephemeral→STM→LTM by criteria, and new knowledge enabling a goal triggers the `HCGPlanner` (which exists in the foundry but is **not invoked anywhere in the loop today**, and still co-exists with a planner stub, logos #403).
 
-6. **Talos integration** — Proposals from sensor data (camera frames, IMU readings) rather than just text. This connects the cognitive loop to the physical world via Talos.
+6. **Context quality / multi-turn memory** — richer context (subgraph snippets, confidence-weighted, summarized) and linking `/llm` turns via `correlation_id` into conversation-level context. Folds into Sprints 5–6.
+
+7. **Talos integration (Horizon 2)** — Proposals from sensor data (camera frames, IMU) rather than just text, connecting the loop to the physical world. Deliberately out of MTS scope.

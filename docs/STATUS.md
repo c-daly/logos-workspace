@@ -1,66 +1,167 @@
 # LOGOS Project Status
 
-**Generated:** 2026-05-25
-**Previous update:** 2026-04-05
-**Foundry Version:** v0.7.0 (all repos at v0.7.0; no new release this period)
+**Generated:** 2026-05-30
+**Previous update:** 2026-05-25
+**Foundry Version:** v0.7.1 (sophia/hermes pinned; apollo/talos still v0.5.0 — see S1-07)
+
+> **Source of truth.** This status is reconciled against the code on `main` plus
+> unmerged frontier branches, not against prose docs. Evidence trail:
+> `vault/10-projects/LOGOS/2026-05-29-ecosystem-audit.md` (code-grounded audit,
+> verified `file:line`) and `docs/plans/2026-05-29-roadmap-to-mts.md` (the MTS
+> roadmap + Sprint-1 tickets). The 2026-05-30 issue realignment
+> (`docs/plans/2026-05-30-issue-realignment.md`) carved the work into six MTS
+> sprints on GitHub.
 
 ---
 
-## What Changed Since April 5
+## The one-paragraph picture
 
-After the new-job pause, work resumed in late May with a focused **environment + test-stack infrastructure push**, plus a **diagnostic session** that surfaced a previously-undocumented runtime gap (see "Key Finding" below). No new service features landed; the period is infrastructure, developer-experience, and reconstruction.
+**The foundation is strong; the cognitive core is still largely spec.** What is
+built and solid: the service topology (5 repos, shared `logos_*` packages,
+ports, config), the reified HCG ontology model, the ingest pipeline
+(Hermes NER/embeddings → Sophia proposal processing → Neo4j + Milvus), the Redis
+event bus with live inter-service ontology sync, the maintenance scheduler, and
+the CI/test-stack/env tooling. What is **not** yet built: the autonomous
+reasoning that turns that pipeline into a mind — feedback that mutates the graph,
+the maintenance reasoning jobs, K-lines/curiosity/CWM-E gain, memory tiers, and
+the persistent event-driven loop. Crucially, the audit found the *built* spine is
+**silently broken at one load-bearing seam**: embeddings never durably persist,
+which starves the type classifier and emergence. That bug is the keystone of the
+near-term plan.
 
-### Recent Work (merged PRs since April 5)
-- **logos-workspace #8** (2026-05-24) — Idempotent env bootstrap for the LOGOS workspace (`bootstrap.sh`): toolchain (uv/Poetry/fnm), Python 3.12 pinning, per-repo extras, vendored webapp SDK build, config distribution.
-- **logos #524** (2026-05-24) — `copy_test_stacks.py`: distribute rendered test stacks from `infra/<repo>/` into downstream repos' `containers/`.
-- **sophia #143** (2026-05-24) — Add `otel` extra (`poetry install -E otel`).
-- **apollo #165** (2026-05-25) — Fix `run_apollo.sh` cold-start: fail loud + build vendored SDKs before webapp install.
-- **hermes #103** (~2026-04-05) — Restructure ML extras, harden publish-ml build (PyTorch CPU index).
-
-### In Flight (open PRs)
-- **logos #525** — `fix(infra): sync test-stack render template with hand-maintained outputs` (Redis service, offset host ports, `${NEO4J_PASSWORD}` bridge, neo4j 5.11.0 pin). **CI green, all review threads resolved — ready to merge.**
-- **logos-workspace #9** — `feat(bootstrap): add --check-config switch` (render by default, drift-check on demand). CI green.
-
-### Blocked
-- **logos #464** — [Sophia] Update M3 planning tests for flexible ontology (`status:blocked`). Gates Goal 5 (planning) progress; blocked on flexible-ontology downstream updates.
-
----
-
-## Key Finding: Apollo HCG/persona UI is empty (no ticket yet)
-
-A live-debug this session found apollo's dashboard shows **no graph and no persona entries, with no errors**. Root cause is **not** empty data or a connection fault:
-
-- Sophia starts (via `run_apollo.sh`), connects to Neo4j (`bolt://localhost:7687`), and **seeds successfully** on boot (pick-and-place, plan, persona).
-- apollo connects to the same Neo4j but reads labels Sophia **no longer writes**: `hcg_client.py` queries `:Entity`/`:Process`/`:State`/`:Plan`/`:StateHistory`, and `persona_store.py` reads `:PersonaEntry`. Grep confirms Sophia writes **none** of these as labels post-#490; persona is persisted as `cwm_e` CWM-state nodes via `CWMPersistence`.
-- Empty result sets aren't errors → blank UI, clean logs.
-
-This is the **documented-but-unstarted work of logos #496** ("Consolidate CWM modules into HCG ontology types and retire `logos_cwm_e`"), whose problem list literally includes *"Apollo's `PersonaEntry` schema drift"* and whose acceptance criteria include *"Apollo's `PersonaEntry` model reconciled with ontology definition"* — all unchecked. It got stranded when the CWM-consolidation track was deferred behind the KG-maintenance track. **Recommend filing an apollo-reader-reconciliation issue under #496** (draft prepared this session).
+**Where the milestone line sits.** Against the full vision (grounding,
+embodiment, the 13-paper program) this is an open-ended research program, not a
+finite backlog. Against the concrete near-term milestone — **Minimum Thinking
+Sophia (MTS)**, defined below — the project is roughly **35–40%**, and MTS is six
+sprints out (see `docs/plans/2026-05-29-roadmap-to-mts.md`).
 
 ---
 
-## Progress Against Vision Goals
+## Keystone finding: embeddings silently fail to persist
 
-1. **Complete the cognitive loop** — *in progress.* Maintenance **scaffolding** done (Redis/pub-sub #500, ontology pub/sub #501, scheduler #508), but the four reasoning jobs (#503–507) are all `todo`. The scheduler runs with essentially no jobs yet.
-2. **Grounding / physical knowledge** — *research active, integration deferred.* Unchanged this period (V-JEPA→CLIP PoC stands at txt_R@1 ≈ 0.371 vs 0.42 target).
-3. **Flexible ontology** — *in progress, partially stalled.* Reified model (#490) merged is the foundation. The CWM→ontology consolidation (#496) is **not started** and is the direct cause of the Apollo finding above. Also open: type_definition UUID migration (#515), capability catalog (#465), downstream propagation (#460/#461).
-4. **Memory and learning** — *not started.* Spec #415; depends on cognitive-loop maturity + testing sanity (#416).
-5. **Planning and execution** — *in progress / blocked.* Planner stub still co-exists with HCGPlanner (#403); blocked on flexible-ontology downstream (#460, #464).
-6. **Embodiment via Talos** — *paused* (deliberately deprioritized until cognition is solid).
-7. **Infrastructure & observability** — *in progress; active this period.* This session: env bootstrap (#8), test-stack render/copy pipeline (#524, #525), run_apollo cold-start (#165), sophia otel extra (#143). Remaining: test data seeder centralization (#481), developer scripts (#409), endpoint spans (#335/#338), cross-service OTel testing (#321).
-8. **Documentation & testing** — *in progress.* PM agent + planning docs rediscovered and STATUS refreshed (this doc). Remaining: onboarding guide (#135), OpenAPI contract tests (#91).
-9. **Situated cognitive agent** — *deferred* (#521; prereqs Goals 1/4/5/6).
+The audit's central finding, re-verified in current code:
+
+- Live flow has entity nodes in Neo4j but the `hcg_*_embeddings` Milvus
+  collections read **0**. Vector persistence is a no-op.
+- **Sophia side** (`sophia/src/sophia/ingestion/proposal_processor.py:519-524`):
+  the `batch_upsert_embeddings` call sits inside a warn-only `try/except` that
+  swallows failure — the pipeline keeps going and logs a `warning`.
+- **Logos side** (`logos/logos_hcg/sync.py:155`): the runtime Milvus schema uses
+  an `auto_id` INT64 primary key with `uuid` as a plain field, while
+  `upsert_embedding`/`batch_upsert_embeddings` call `collection.insert()`
+  (`sync.py:315,365`) — so a re-synced `uuid` **appends a duplicate** instead of
+  replacing, despite comments claiming upsert semantics. The init script
+  (`infra/init_milvus_collections.py`) ships a *contradictory* `uuid`-PK schema,
+  and the guard test encodes the init schema, so the divergence passes in CI.
+
+**Consequence:** with no retrievable vectors, the type classifier degrades to the
+fallback `'entity'` type for everything, and #505 emergent-type discovery loads 0
+cluster members → "no qualifying clusters." This single seam neuters the whole
+maintenance/emergence arm.
+
+**Tracked as the Sprint-1 keystone:** **sophia#146** (warn-only swallow at
+ingestion) depends on **logos#528** (upsert-by-uuid + schema reconciliation).
+Fix logos#528 first, then sophia#146.
 
 ---
 
-## Drift / Reconciliation
+## What's built and solid
 
-`scripts/reconcile-issues.sh` flags older open issues (mostly 2026-02/03) not reflected in the project board — e.g. logos #412 (event-driven reflection), #411 (hierarchical memory), #403 (deprecate planner_stub), #321/#335/#338/#339 (OTel gaps), #246/#264/#265/#267 (persona diary stack — legacy `logos_cwm_e`, subsumed by #496), and the maintenance stories #503–507. Worth a board/label pass at next vision review.
+| Area | State | Evidence |
+|------|-------|----------|
+| Service topology + shared packages | Solid | `logos_config`, `logos_hcg`, `logos_events`, ports, 5 repos wired |
+| Reified HCG ontology model | Solid | logos #490 merged on main (flexible-ontology migration) |
+| Ingest pipeline (Hermes → Sophia → Neo4j/Milvus) | Built, runs | `ProposalBuilder` (now tested), `ProposalProcessor`; **but** embeddings don't persist (keystone) |
+| Redis event bus + inter-service ontology sync | Built, on main | `logos_events.EventBus`; sophia #501 pub/sub publisher merged |
+| Maintenance scheduler | Built, on main | sophia #508 merged — runs, but the reasoning jobs it would dispatch (#503/#504/#506) are unbuilt |
+| Type classification via centroids | Built | sophia #129 / logos #494 — degrades to fallback while embeddings are empty (keystone) |
+| CI / test-stack render-and-copy / env bootstrap | Active, recent | logos #524, logos-workspace #8/#9, apollo #165, sophia #143 |
+
+## What's spec / in-flight / not started
+
+| Area | State | Tracking |
+|------|-------|----------|
+| Emergent type discovery (#505) | Built + unit-tested, **unmerged**, can't run live until keystone lands | `feat/505-emergent-type-discovery` (sophia), `feat/505-name-cluster` (hermes) — S1-05 |
+| Feedback that mutates the graph | Not started — `/feedback` is a stub that logs and returns | Sprint 2 (#499 epic, #503/#504/#506/#507) |
+| Maintenance reasoning jobs | Not started — scheduler has ~no jobs | Sprint 2 |
+| Orchestrator + persistent event-driven loop + daemons | Not started — Sophia is request/response | Sprint 3 (under-decomposed by design) |
+| K-lines / curiosity / CWM-E gain | Not started — CWM-E state models exist, mechanisms don't | Sprint 4 |
+| Memory tiers + planning-in-loop | Not started | Sprint 5 (#415 epic, #460/#464 et al.) |
+| CWM→ontology consolidation (retire `logos_cwm_e`) | Not started — root cause of the empty Apollo dashboard | logos #496 (Sprint 6 reconcile) |
+| Grounding / JEPA (CWM-G) | Research active, integration deferred (Horizon 2) | V-JEPA→CLIP PoC, txt_R@1 ≈ 0.371 vs 0.42 target |
+| Embodiment via Talos | Paused (Horizon 2) | deliberate |
 
 ---
 
-## Current Priorities (carried from VISION + this session)
+## Minimum Thinking Sophia (MTS) — the near-term milestone
 
-1. **Apollo reader reconciliation** (slice of #496) — get the dashboard surfacing seeded data; unblocks day-to-day use and validates the cognitive loop end-to-end.
-2. Cognitive-loop expansion — first KG-maintenance reasoning job (#503 entity resolution; design + plan ready).
-3. Flexible-ontology consolidation (#496 in full) + downstream propagation (#460/#461/#515).
-4. Merge the in-flight infra PRs (logos #525, logos-workspace #9); infra hardening (seeder #481, remaining standardization).
+MTS is the point where LOGOS stops being *infrastructure + a thin ingestion loop*
+and becomes *a small mind that runs*: given a stream of experience (text for now),
+Sophia **autonomously grows and maintains** a non-linguistic graph,
+**reasons/plans** over it, **learns from feedback**, runs as a **persistent
+event-driven loop**, and **surfaces its cognitive state in Apollo**. Everything
+past MTS — JEPA grounding, Talos embodiment, the situated multi-device agent, the
+efficiency program, the papers — is **Horizon 2**, deliberately out of scope here.
+
+### The six MTS sprints
+
+| # | Goal | Exit (abbrev.) | ~% after |
+|---|------|----------------|----------|
+| **1** | **Make the built spine actually run & be trusted** | ingest→embed→classify→emerge works on live infra; CI would catch a regression; #505 merged & live-verified | ~45% |
+| **2** | Close the feedback loop (Learning v0) | feedback mutates the graph; maintenance jobs run | ~55% |
+| **3** | Orchestrator + event-driven loop + daemons | Sophia runs as a persistent process reacting to bus events | ~65% |
+| **4** | K-lines + curiosity + CWM-E gain (Cognition v1) | stimulus activates a constellation; non-activation emits curiosity; gain modulates processing | ~75% |
+| **5** | Memory tiers + planning-in-loop | knowledge promotes ephemeral→STM→LTM; new knowledge triggers HCGPlanner | ~85% |
+| **6** | Demonstrate the thesis (MTS integration) | recorded end-to-end session, Apollo rendering goal→plan→diary→cognitive-state | **~95% = MTS** |
+
+Weight concentrates in Sprints 3–4 (the genuinely novel cognitive mechanisms).
+Sprints S3/S4 are intentionally under-decomposed on the board — decompose when
+they approach. Full detail and per-ticket ACs in
+`docs/plans/2026-05-29-roadmap-to-mts.md`.
+
+---
+
+## Sprint 1 — "Make the built spine actually run & be trusted"
+
+The active sprint. Goal: every component the audit found *built-but-secretly-broken
+or untested* is fixed and provably working end-to-end, and #505 lands
+live-verified. Critical path: **logos#528 → sophia#146 → {S1-04, S1-05}**.
+
+| Ticket | What | Issue | State |
+|--------|------|-------|-------|
+| S1-01 🔴 keystone | Embedding persistence silently fails at ingestion | **sophia#146** | open |
+| S1-02 🔴 | HCGMilvusSync can't upsert-by-uuid (auto_id PK) + schema divergence | **logos#528** | open |
+| S1-03 🟠 | Redis missing from CI test stacks (pub/sub never exercised) | folded into logos #526 | open |
+| S1-04 🟠 | De-vacuum integration tests + run them in CI | **logos#529** | open (5 prune PRs linked) |
+| S1-05 🟢 | Finish & merge #505 emergent type discovery, live-verified | logos #505 | in-progress |
+| S1-06 🟡 | FeedbackConfig default Hermes port 18000→17000 | folded into sophia #142 | open |
+| S1-07 🟡 | Cross-repo foundry sync (apollo/talos still v0.5.0) + workspace hygiene | **logos#530** | open |
+| S1-08 🟢 | Doc refresh (this document, VISION, COGNITIVE_LOOP, vault landing) | **logos#531** | in-progress |
+
+**Sprint exit (DoD):** seed the demo scenario → run a `/llm` turn mentioning new
+entities → confirm (a) embeddings land in Milvus, (b) the classifier assigns
+non-fallback types, (c) `type_emergence` mints ≥1 real emergent type, (d) Apollo's
+dashboard shows the result — and a CI run that **fails** if any of those breaks.
+
+---
+
+## Known live-data gotcha: empty Apollo dashboard
+
+Apollo's dashboard shows **no graph and no persona entries, with no errors**. Root
+cause is schema drift, not missing data: Apollo's `hcg_client.py` queries
+`:Entity`/`:Process`/`:State`/`:Plan` labels and `persona_store.py` reads
+`:PersonaEntry`, but Sophia no longer writes those as labels post-#490 (persona is
+persisted as `cwm_e` CWM-state nodes). Empty result sets aren't errors → blank UI,
+clean logs. This is the unstarted work of **logos #496** (consolidate CWM modules
+into HCG ontology types; reconcile Apollo's reader), slated for **Sprint 6**.
+
+---
+
+## Deferred manual step (not in this PR)
+
+The vault LOGOS landing/narrative still lists **old ports (18000/28000…) and dead
+monorepo paths** and should be re-pointed at the audit
+(`2026-05-29-ecosystem-audit.md`) and the MTS roadmap. The vault is edited through
+a separate tool, not from this repo, so per S1-08 that update is left as a manual
+follow-up for the maintainer. This PR refreshes only the in-repo workspace docs
+(`docs/STATUS.md`, `docs/VISION.md`, `docs/COGNITIVE_LOOP.md`).
