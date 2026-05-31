@@ -7,6 +7,10 @@ logos/
 
 .worktrees/
 
+# Stray per-repo worktree / scratch dirs (e.g. apollo-wt-166/, sophia-wt-505/)
+*-wt-*/
+apollo-wt-166/
+
 .ipynb_checkpoints/
 *log.json
 *.log
