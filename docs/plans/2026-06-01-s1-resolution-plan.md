@@ -80,10 +80,15 @@ them from the (drifted) existing branch history.
 `apollo/src/apollo/sdk/__init__.py:157` raises `"Cannot reach Hermes at {url} while {action}: {exc}"`,
 conflating a read **timeout** with a **connection failure**.
 
-**Approach:** in the SDK call path, catch `httpx.TimeoutException` (and subclasses)
-distinctly from `httpx.ConnectError`/`ConnectTimeout`, and surface a different message
-(e.g. "Hermes timed out after Ns" vs "Cannot reach Hermes"). Align/raise the 30s ceiling or
-make it configurable. Keep the public error contract backward-compatible where possible.
+**Approach:** in the SDK call path, branch on exception type — "Cannot reach Hermes" for
+connection failures (`httpx.ConnectError`, `httpx.ConnectTimeout`) vs "Hermes timed out after
+Ns" for read/pool timeouts (`httpx.ReadTimeout`, `httpx.PoolTimeout`). **Order matters:**
+`ConnectTimeout` is a subclass of `TimeoutException`, so the connection-failure cases must be
+checked *before* any broad `TimeoutException` catch, or a connect-timeout gets mislabeled as a
+slow response (per review on PR #15). NB the generated SDK may raise urllib3/socket timeouts
+rather than httpx — match on the concrete type the transport actually raises (confirm first;
+see the #171 task notes). Align/raise the 30s ceiling or make it configurable; keep the public
+error contract backward-compatible where possible.
 
 **Tests:** (TDD) unit tests that monkeypatch the httpx client to raise `ReadTimeout` vs
 `ConnectError` and assert the distinct messages/handling. (Playwright) drive the chat UI
@@ -130,7 +135,10 @@ re-verify the cosmology repro live.
    against **live Milvus** — only do this with infra up and full verification; otherwise
    leave the failing/xfail test + a precise root-cause note for review.
 
-**Tests:** live-Milvus integration test (not mock), per the acceptance. (CI) hermes tests.
+**Tests:** live-Milvus integration test (not mock), per the acceptance — but guard it with
+`@pytest.mark.skipif` / a fixture that skips when no Milvus is reachable, so local runs and
+CI environments without Milvus don't break (per review on PR #15). (CI) hermes tests; the
+integration job supplies live Milvus.
 
 **Risk:** medium-high for the fix (ingestion path; needs live infra). Test-first is safe.
 
