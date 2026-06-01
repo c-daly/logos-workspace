@@ -58,16 +58,21 @@ script + worktree gitignore were already merged (workspace PR #13). The prior bu
 (talos#60, apollo#170) were closed-not-merged; owner since clarified they "shouldn't have
 been closed".
 
-**Done this session:** bumped both to **v0.7.2** on feature branches → **talos#61**,
-**apollo#175**. Verified locally: `poetry lock` resolves cleanly, `poetry check` valid,
-lockfiles reference v0.7.2, no v0.5.0 left. CI (apollo): Playwright E2E + Node + JS +
-Greptile pass. **Python lint & tests pending** (confirm before declaring resolved).
+**Done this session:** bumped both to **v0.7.2** → **talos#65** (Closes talos#64) +
+**apollo#179** (Closes apollo#178), on convention-conformant branches
+`chore/<repo><ticket>-bump-foundry` (per GIT_PROJECT_STANDARDS.md). Verified locally
+(`poetry lock` resolves, `poetry check` valid, lockfiles at v0.7.2, no v0.5.0 left) and in
+CI (Python lint & tests pass on both; apollo Playwright E2E + Node + JS pass; branch-naming
++ issue-linkage + sync-status pass). Per-repo sub-tickets talos#64 / apollo#178 track the
+bump under the foundry-sync epic logos#530.
 
-**Open decision:** `sync-status` CI fails on both — the `issue-sync.yml` workflow extracts
-the leading number from the branch name (`chore/530-…` → `530`) and looks up issue #530 in
-the *same* repo (talos/apollo have no #530) → 404. Options: (a) create per-repo sub-tickets
-+ recreate branches against them (owner's stated convention); (b) accept the benign red
-(not merging); (c) fix `issue-sync.yml` to tolerate cross-repo refs / missing issues.
+**Resolved:** the initial branches violated the naming convention (`chore/530-…`, then
+`chore/logos530-…`) — both mis-referenced a logos issue on talos/apollo branches and tripped
+`sync-status` (issue-sync looked up a nonexistent same-repo #530 → 404). Fixed by following
+GIT_PROJECT_STANDARDS.md strictly: per-repo sub-tickets (talos#64, apollo#178) and conformant
+branches `chore/talos64-bump-foundry` / `chore/apollo178-bump-foundry` with `Closes #N`. All
+checks pass. Lesson: the documented standard is authoritative for conventions — do not derive
+them from the (drifted) existing branch history.
 
 ### apollo#171 — distinguish Hermes timeout from unreachable  *(safe to implement)*
 
@@ -173,13 +178,14 @@ overrides; a sync script) with tradeoffs + a recommendation, as a design doc / d
   codex REQUEST-CHANGES — double `buildGraph` per render + filters leaking into the type
   list; un-namespaced reified IDs (collision risk); no `edge` color; thin tests. Findings
   recorded for follow-up.
-- 🔄 **logos#530** — talos#61 + apollo#175 opened; verified locally; CI partially green;
-  sync-status convention decision pending.
+- ✅ **logos#530** — talos#65 (Closes talos#64) + apollo#179 (Closes apollo#178) opened on
+  convention-conformant branches; all CI green (Python tests + Playwright + branch-naming +
+  sync-status). Earlier mis-named PRs (talos#61–63, apollo#175–177) closed + branches deleted.
+  Awaiting human merge.
 
 ## Open decisions for the owner
 
-1. **#530 sync-status convention** — (a) per-repo sub-tickets, (b) accept benign red, or
-   (c) fix `issue-sync.yml`.
-2. **Scope** — confirm which of #171 / #91 / #535-fix / #148 / #539 to actually implement
+1. **Scope** — confirm which of #171 / #91 / #535-fix / #148 / #539 to actually implement
    autonomously vs. plan-only.
-3. **apollo#174** — apply codex's REQUEST-CHANGES fixes, or leave for manual review?
+2. **apollo#174** — apply codex's REQUEST-CHANGES fixes, or leave for manual review?
+3. **#530 merge** — talos#65 + apollo#179 are green and ready; merge is yours to make.
